@@ -6,8 +6,9 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as io;
 import 'package:shelf_router/shelf_router.dart';
 import 'package:shelf_cors_headers/shelf_cors_headers.dart';
-import 'anime_function.dart';
-
+import 'models/anime_models.dart';
+import 'services/anime_api_service.dart';
+import 'services/anime_storage_service.dart';
 // ServerEventBus 保持不变
 class ServerEventBus {
   static final StreamController<String> _controller = StreamController.broadcast();

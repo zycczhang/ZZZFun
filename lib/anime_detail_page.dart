@@ -2,10 +2,11 @@ import 'dart:async';
 import 'dart:math'; // 引入 math 库用于 min 计算
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
-import 'anime_function.dart';
 import 'anime_nav_widgets.dart';
 import 'package:flutter/services.dart';
-
+import 'models/anime_models.dart';
+import 'services/anime_api_service.dart';
+import 'services/anime_storage_service.dart';
 class AnimeDetailPage extends StatefulWidget {
   final String url;
   // 新增：接收从历史记录传来的播放信息

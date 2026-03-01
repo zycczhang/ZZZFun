@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-import 'anime_function.dart'; // 引用你的 AnimeApiService 以获取 headers
 
 class HeadlessWeb {
   static HeadlessInAppWebView? _headlessWebView;

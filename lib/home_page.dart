@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'anime_function.dart';
 import 'anime_nav_widgets.dart';
 import 'anime_detail_page.dart';
 import 'web_server_service.dart';
 import 'dart:async';
-
+import 'models/anime_models.dart';
+import 'services/anime_api_service.dart';
+import 'services/anime_storage_service.dart';
 // VideoCard 类 - 包含AI的修改（传递播放进度、样式优化）
 class VideoCard extends StatelessWidget {
   final AnimeItem anime;

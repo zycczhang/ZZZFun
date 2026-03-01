@@ -2,10 +2,9 @@ import 'dart:async'; // 必须引入
 import 'package:flutter/material.dart';
 import 'home_page.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
-import 'anime_function.dart';
 import 'web_server_service.dart';
 import 'package:ZYCFun/HeadlessWeb.dart';
-
+import 'services/anime_api_service.dart';
 void main() async {
   // 1. 拦截 Print 的关键代码
   runZoned(
