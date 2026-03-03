@@ -203,7 +203,7 @@ class AnimeDetailController extends ChangeNotifier {
     AnimeItem historyItem = AnimeItem(
       title: detail!.title,
       imageUrl: detail!.imageUrl,
-      note: "上次播放到 $currentEpisodeName ${_formatDuration(currentPos)}",
+      note: "上次播放到 $currentEpisodeName ${formatDuration(currentPos)}",
       url: url,
       playbackInfo: {
         'sourceIndex': currentSourceIndex,
@@ -257,7 +257,7 @@ class AnimeDetailController extends ChangeNotifier {
   }
 
   // 工具：格式化
-  String _formatDuration(Duration d) {
+  String formatDuration(Duration d) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
     if (d.inHours > 0) {
       return "${twoDigits(d.inHours)}:${twoDigits(d.inMinutes.remainder(60))}:${twoDigits(d.inSeconds.remainder(60))}";

@@ -10,7 +10,6 @@ class AnimeApiService {
   static String baseUrl = 'https://omofun03.top';
   // 发布页地址
   static const String publishPageUrl = 'https://omofun111.top/';
-
   // 统一的请求头管理
   static Map<String, String> _getHeaders({String? referer}) {
     return {
@@ -20,7 +19,6 @@ class AnimeApiService {
       'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
     };
   }
-
   // 1. 获取周更表
   static Future<List<WeeklyData>> fetchAnimeData() async {
     try {
@@ -69,7 +67,6 @@ class AnimeApiService {
       rethrow;
     }
   }
-
   // 2. 获取动画详情
   static Future<AnimeDetail> fetchAnimeDetail(String url) async {
     try {
@@ -138,7 +135,6 @@ class AnimeApiService {
       rethrow;
     }
   }
-
   // 3. 获取视频真实播放地址
   static Future<String> getRealVideoUrl(String playPageUrl) async {
     try {
@@ -199,8 +195,6 @@ class AnimeApiService {
     }
     return "";
   }
-
-
   // 4. 搜索功能
   static Future<SearchResult> searchAnime(String keyword, {int page = 1}) async {
     try {
@@ -275,7 +269,6 @@ class AnimeApiService {
       return SearchResult(items: [], hasNextPage: false);
     }
   }
-
   // [新增] 5. 通过ID获取视频信息 (用于ID搜索)
   static Future<AnimeItem?> getAnimeById(String id) async {
     // 构造完整的详情页 URL
@@ -296,7 +289,6 @@ class AnimeApiService {
       return null;
     }
   }
-
   // [新增] 6. 获取分类库数据 (动画库/电影库等)
   static Future<SearchResult> fetchCategoryData(int typeId, {int page = 1}) async {
     try {
@@ -355,7 +347,6 @@ class AnimeApiService {
       return SearchResult(items: [], hasNextPage: false);
     }
   }
-
   // 新增：初始化 BaseUrl (在 main.dart 中调用)
   static Future<void> init() async {
     String? savedUrl = await AnimeStorageService.getBaseUrl();
@@ -368,7 +359,6 @@ class AnimeApiService {
       print("已加载本地配置 BaseUrl: $baseUrl");
     }
   }
-
   // 新增：获取最新可用线路列表
   static Future<List<RouteItem>> fetchAvailableRoutes() async {
     try {
