@@ -413,4 +413,73 @@ class AnimeApiService {
     }
     return [];
   }
+// 新增：获取主页所有数据
+  static Future<HomeData> fetchHomeData() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/'),
+        headers: _getHeaders(),
+      );
+      if (response.statusCode == 200) {
+        var document = parse(response.body);
+
+        // --- 1. 解析轮播图 ---
+        List<AnimeItem> banners = [];
+        // 这里的选择器根据你提供的HTML：.swiper-big 中的 .swiper-slide
+        var bannerNodes = document.querySelectorAll('.swiper-big .swiper-slide:not(.swiper-slide-duplicate)');
+        for (var node in bannerNodes) {
+          var aTag = node.querySelector('a.banner');
+          String title = node.querySelector('.v-title span')?.text ?? "";
+          String style = aTag?.attributes['style'] ?? "";
+
+          // 正则提取 background: url(...) 里的链接
+          RegExp regExp = RegExp(r'url\((.*?)\)');
+          var match = regExp.firstMatch(style);
+          String imageUrl = match?.group(1) ?? "";
+          String relativeUrl = aTag?.attributes['href'] ?? "";
+          String fullUrl = relativeUrl.startsWith('http') ? relativeUrl : "$baseUrl$relativeUrl";
+          if (fullUrl.isNotEmpty && title.isNotEmpty) {
+            banners.add(AnimeItem(
+              title: title,
+              imageUrl: imageUrl,
+              note: node.querySelector('.v-ins p')?.text ?? "",
+              url: fullUrl,
+            ));
+          }
+        }
+        // --- 2. 解析新番板块 (周更表) ---
+        var modules = document.querySelectorAll('.module');
+        var targetModule = modules.firstWhere(
+              (m) => m.querySelector('.module-title')?.text.contains("一月新番") ?? false,
+          orElse: () => modules.first,
+        );
+        var tabs = targetModule.querySelectorAll('.module-tab-item');
+        var lists = targetModule.querySelectorAll('.module-main.tab-list');
+        List<WeeklyData> weeklyList = [];
+        for (int i = 0; i < tabs.length; i++) {
+          String day = tabs[i].attributes['data-dropdown-value'] ?? "";
+          List<AnimeItem> items = [];
+          var animeNodes = lists[i].querySelectorAll('.module-item');
+          for (var node in animeNodes) {
+            var img = node.querySelector('img');
+            String relativeUrl = node.attributes['href'] ?? "";
+            String fullUrl = relativeUrl.startsWith('http') ? relativeUrl : "$baseUrl$relativeUrl";
+            items.add(AnimeItem(
+              title: node.attributes['title'] ?? "",
+              imageUrl: img?.attributes['data-original'] ?? img?.attributes['src'] ?? "",
+              note: node.querySelector('.module-item-note')?.text ?? "",
+              url: fullUrl,
+            ));
+          }
+          weeklyList.add(WeeklyData(day: day, items: items));
+        }
+        return HomeData(banners: banners, weeklyAnime: weeklyList);
+      } else {
+        throw Exception("加载首页失败");
+      }
+    } catch (e) {
+      print("首页抓取异常: $e");
+      rethrow;
+    }
+  }
 }

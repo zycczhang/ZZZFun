@@ -5,13 +5,13 @@ import 'anime_detail_page.dart';
 import 'web_server_service.dart';
 import 'dart:async';
 import 'models/anime_models.dart';
+import 'controllers/home_controller.dart';
 import 'services/anime_api_service.dart';
 import 'services/anime_storage_service.dart';
 // VideoCard 类 - 包含AI的修改（传递播放进度、样式优化）
 class VideoCard extends StatelessWidget {
   final AnimeItem anime;
   final VoidCallback? onPageReturn;
-
   const VideoCard({super.key, required this.anime, this.onPageReturn});
 
   @override
@@ -23,14 +23,11 @@ class VideoCard extends StatelessWidget {
           MaterialPageRoute(
             builder: (context) => AnimeDetailPage(
               url: anime.url,
-              // 关键修改：传递历史进度信息
               initialPlaybackInfo: anime.playbackInfo,
             ),
           ),
         ).then((_) {
-          if (onPageReturn != null) {
-            onPageReturn!();
-          }
+          if (onPageReturn != null) onPageReturn!();
         });
       },
       builder: (context, focused) {
@@ -42,18 +39,46 @@ class VideoCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Container(
+                  // 1. 移除 decoration 中的 image 属性
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(12),
-                    border: focused ? Border.all(color: Colors.white, width: 3) : null,
-                    image: DecorationImage(
-                      image: anime.imageUrl.isNotEmpty
-                          ? NetworkImage(anime.imageUrl)
-                          : const NetworkImage("https://via.placeholder.com/150"),
-                      fit: BoxFit.cover,
-                    ),
+                    border: focused ? Border.all(color: Colors.orange, width: 3) : null,
+                    color: Colors.black, // 设置背景色防止透明闪烁
                   ),
+                  // 2. 启用裁剪，确保子图片圆角显示
+                  clipBehavior: Clip.antiAlias,
+                  // 3. 使用 Stack/Image.network 替代 DecorationImage
                   child: Stack(
+                    fit: StackFit.expand,
                     children: [
+                      Image.network(
+                        anime.imageUrl.isNotEmpty
+                            ? anime.imageUrl
+                            : "${AnimeApiService.baseUrl}/template/mxpro/mxtheme/images/load.gif",
+                        fit: BoxFit.cover,
+                        // 关键属性：防止图片重建时闪烁
+                        gaplessPlayback: true,
+                        // 可选：添加加载占位符优化体验
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.orange,
+                              strokeWidth: 2,
+                              value: loadingProgress.expectedTotalBytes != null
+                                  ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                  : null,
+                            ),
+                          );
+                        },
+                        // 可选：加载失败时显示错误图标
+                        errorBuilder: (context, error, stackTrace) {
+                          return const Center(
+                            child: Icon(Icons.broken_image, color: Colors.white30, size: 30),
+                          );
+                        },
+                      ),
+                      // 4. 将原有的 note 标签移到 Stack 中，保持在图片上方
                       if (anime.note.isNotEmpty)
                         Positioned(
                           bottom: 8,
@@ -61,26 +86,18 @@ class VideoCard extends StatelessWidget {
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                             decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.8), // 加深背景色
+                              color: Colors.black.withOpacity(0.8),
                               borderRadius: BorderRadius.circular(4),
                             ),
-                            child: Text(
-                              anime.note,
-                              style: const TextStyle(fontSize: 10, color: Colors.orange), // 改变颜色突出显示
-                            ),
+                            child: Text(anime.note, style: const TextStyle(fontSize: 10, color: Colors.orange)),
                           ),
-                        )
+                        ),
                     ],
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
-              Text(
-                anime.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-              ),
+              const SizedBox(height: 8),
+              Text(anime.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14)),
             ],
           ),
         );
@@ -92,7 +109,6 @@ class VideoCard extends StatelessWidget {
 // PersonalCenterPage 类 - 完整修改版（合并收藏和历史功能）
 class PersonalCenterPage extends StatefulWidget {
   const PersonalCenterPage({super.key});
-
   @override
   State<PersonalCenterPage> createState() => _PersonalCenterPageState();
 }
@@ -704,336 +720,31 @@ class TvHomePage extends StatefulWidget {
   @override
   State<TvHomePage> createState() => _TvHomePageState();
 }
-
 class _TvHomePageState extends State<TvHomePage> {
-  int _selectedTopIndex = 0; // 0:动画, 1:综艺, 2:电影, 3:电视剧 4.私密
-  int _selectedNavIndex = 2; // 默认首页
-  // 1. 新增：私密模式解锁状态
+  int _selectedNavIndex = 2; // 默认选中中间的“首页”图标
+  late HomeController _homeController;
   bool _isPrivateUnlocked = false;
-  // 星期栏相关 (仅 Tab 0 使用)
-  int _selectedWeekIndex = 100; // 0-6 代表周一到周日, 100 代表动画库
-  List<WeeklyData> _weeklyAnimeData = [];
-  bool _isWeekLoading = true;
-
-  // 通用分类库数据 (用于 动画库/综艺/电影/电视剧)
-  List<AnimeItem> _libraryItems = [];
-  int _libraryPage = 1;
-  bool _libraryHasNext = false;
-  bool _isLibraryLoading = false;
-
-  // 常量定义
-  static const int _animeWeekLibId = 100; // 动画页中的"库"按钮ID
-
-  final FocusNode _firstTabNode = FocusNode();
-
-  // 新增：事件订阅
-  StreamSubscription? _serverEventSub;
-  @override
-  void initState() {
-    super.initState();
-    _fetchWeeklyData();
-    // 初始加载动画库数据 (默认 Anime ID 4)
-    _fetchLibraryData(typeId: 4, page: 1);
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_selectedNavIndex == 2 && _firstTabNode.canRequestFocus) {
-        _firstTabNode.requestFocus();
-      }
-
-
-    });
-
-    // 监听服务器事件
-    _serverEventSub = ServerEventBus.stream.listen((event) {
-      if (event.startsWith(ServerEventBus.eventPlayUrl)) {
-        String url = event.substring(ServerEventBus.eventPlayUrl.length);
-        _handleRemotePlay(url);
-      }
-    });
-
-  }
-
-  @override
-  void dispose() {
-    _serverEventSub?.cancel(); // 记得取消监听
-    _firstTabNode.dispose();
-    super.dispose();
-  }
-
-  void _handleRemotePlay(String url) {
-    if (!mounted) return;
-    // 使用 Navigator 跳转
-    // 注意：如果当前已经在播放页，可能需要先 pop，这里简单处理直接 push
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => AnimeDetailPage(url: url),
-      ),
-    );
-  }
 
   void _unlockPrivateMode() {
     setState(() {
       _isPrivateUnlocked = true;
-      // 可选：解锁后直接跳转回首页看效果
-      // _selectedNavIndex = 2;
-      // _selectedTopIndex = 4; // 直接选中私密Tab
     });
-    // 切换到私密Tab后，立即加载数据
-    // _fetchLibraryData(typeId: 5, page: 1);
-  }
-
-  // 获取 Tab 对应的 TypeId
-  int _getTypeIdForTab(int tabIndex) {
-    switch (tabIndex) {
-      case 0: return 4; // 动画
-      case 1: return 3; // 综艺 (3)
-      case 2: return 1; // 电影 (通常是 1)
-      case 3: return 2; // 电视剧 (2)
-      case 4: return 5; // 私密专区
-      default: return 4;
-    }
-  }
-
-  // 切换顶部 Tab
-  void _onTopTabChanged(int index) {
-    if (_selectedTopIndex == index) return;
-
-    setState(() {
-      _selectedTopIndex = index;
-      // 切换 Tab 时重置库数据
-      _libraryItems = [];
-      _libraryPage = 1;
-      _isLibraryLoading = true;
-    });
-
-    // 如果不是动画Tab(0)，或者 是动画Tab且当前选中的是"库"(100)，则加载数据
-    if (index != 0 || (index == 0 && _selectedWeekIndex == _animeWeekLibId)) {
-      _fetchLibraryData(typeId: _getTypeIdForTab(index), page: 1);
-    }
-  }
-
-  // 获取首页周更表
-  Future<void> _fetchWeeklyData() async {
-    setState(() => _isWeekLoading = true);
-    try {
-      var data = await AnimeApiService.fetchAnimeData();
-      setState(() {
-        _weeklyAnimeData = data;
-        _isWeekLoading = false;
-      });
-    } catch (e) {
-      print("周更表异常: $e");
-      if(mounted) setState(() => _isWeekLoading = false);
-    }
-  }
-
-  // 获取分类库数据 (通用)
-  Future<void> _fetchLibraryData({required int typeId, int page = 1}) async {
-    setState(() {
-      _isLibraryLoading = true;
-      _libraryItems = [];
-    });
-
-    try {
-      var result = await AnimeApiService.fetchCategoryData(typeId, page: page);
-      if (mounted) {
-        setState(() {
-          _libraryItems = result.items;
-          _libraryHasNext = result.hasNextPage;
-          _libraryPage = page;
-          _isLibraryLoading = false;
-        });
-      }
-    } catch (e) {
-      print("分类库异常: $e");
-      if (mounted) setState(() => _isLibraryLoading = false);
-    }
-  }
-
-  // 翻页逻辑
-  void _changeLibraryPage(int newPage) {
-    int typeId = _getTypeIdForTab(_selectedTopIndex);
-    _fetchLibraryData(typeId: typeId, page: newPage);
-  }
-
-  // 构建星期栏（包含“动画库”按钮）- 仅用于 Tab 0
-  Widget _buildWeekBar() {
-    List<Widget> weekButtons = List.generate(_weeklyAnimeData.length, (index) {
-      bool isSelected = _selectedWeekIndex == index;
-      return FocusableWidget(
-        onTap: () => setState(() => _selectedWeekIndex = index),
-        builder: (context, focused) {
-          return Container(
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              color: focused ? Colors.white : (isSelected ? Colors.blueAccent : Colors.white10),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              _weeklyAnimeData[index].day,
-              style: TextStyle(color: focused ? Colors.black : Colors.white, fontSize: 13),
-            ),
-          );
-        },
-      );
-    });
-
-    bool isLibSelected = _selectedWeekIndex == _animeWeekLibId;
-    weekButtons.add(
-      FocusableWidget(
-        onTap: () {
-          setState(() {
-            _selectedWeekIndex = _animeWeekLibId;
-          });
-          _fetchLibraryData(typeId: 4, page: 1); // 动画库 ID 4
-        },
-        builder: (context, focused) {
-          return Container(
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              color: focused ? Colors.white : (isLibSelected ? Colors.orange : Colors.white10),
-              borderRadius: BorderRadius.circular(4),
-              border: isLibSelected ? Border.all(color: Colors.orange) : null,
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.video_library, size: 14, color: focused ? Colors.black : Colors.white),
-                const SizedBox(width: 4),
-                Text(
-                  "动画库",
-                  style: TextStyle(color: focused ? Colors.black : Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-    return Container(
-      height: 40,
-      margin: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: weekButtons,
+    // 可选：给用户一个反馈
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("绅士领域已开启"),
+        duration: Duration(seconds: 2),
+        backgroundColor: Colors.orange,
       ),
     );
   }
 
-  // 通用的网格+分页视图
-  Widget _buildLibraryView() {
-    if (_isLibraryLoading && _libraryItems.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_libraryItems.isEmpty) {
-      return const Center(child: Text("暂无数据——更换节点试试", style: TextStyle(color: Colors.white54)));
-    }
-    return Column(
-      children: [
-        // 列表区域
-        Expanded(
-          child: GridView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 30),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 5,
-              crossAxisSpacing: 20,
-              mainAxisSpacing: 30,
-              childAspectRatio: 0.7,
-            ),
-            itemCount: _libraryItems.length,
-            itemBuilder: (context, index) => VideoCard(anime: _libraryItems[index]),
-          ),
-        ),
-        // 分页区域
-        Container(
-          height: 60,
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // 上一页
-              if (_libraryPage > 1)
-                FocusableWidget(
-                  onTap: () => _changeLibraryPage(_libraryPage - 1),
-                  builder: (context, focused) => Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                    margin: const EdgeInsets.only(right: 20),
-                    decoration: BoxDecoration(
-                      color: focused ? Colors.white : Colors.white10,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text("上一页", style: TextStyle(color: focused ? Colors.black : Colors.white)),
-                  ),
-                ),
-
-              Text("第 $_libraryPage 页", style: const TextStyle(color: Colors.white54)),
-
-              // 下一页
-              if (_libraryHasNext)
-                FocusableWidget(
-                  onTap: () => _changeLibraryPage(_libraryPage + 1),
-                  builder: (context, focused) => Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                    margin: const EdgeInsets.only(left: 20),
-                    decoration: BoxDecoration(
-                      color: focused ? Colors.white : Colors.white10,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text("下一页", style: TextStyle(color: focused ? Colors.black : Colors.white)),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
+  @override
+  void initState() {
+    super.initState();
+    _homeController = HomeController();
+    _homeController.init();
   }
-
-  // 构建内容区域
-  Widget _buildHomeContent() {
-    // 逻辑：
-    // 1. 如果是 Tab 0 (动画)
-    if (_selectedTopIndex == 0) {
-      // 如果选中了动画库按钮，显示通用库视图
-      if (_selectedWeekIndex == _animeWeekLibId) {
-        return _buildLibraryView();
-      }
-      // 否则显示周更表内容
-      if (_selectedWeekIndex >= _weeklyAnimeData.length) {
-        return const SizedBox();
-      }
-      var currentList = _weeklyAnimeData[_selectedWeekIndex].items;
-      return GridView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 30),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 5,
-          crossAxisSpacing: 20,
-          mainAxisSpacing: 30,
-          childAspectRatio: 0.7,
-        ),
-        itemCount: currentList.length,
-        itemBuilder: (context, index) => VideoCard(anime: currentList[index]),
-      );
-    }
-    // 2. 如果是 Tab 1 (综艺), 2 (电影), 3 (电视剧), 4 (私密)
-    else {
-      // 直接显示通用库视图
-      return _buildLibraryView();
-    }
-  }
-
-  Widget _buildOtherPage(String title) {
-    return Center(
-      child: Text(
-        "$title 页面  没什么要设置的",
-        style: const TextStyle(fontSize: 24, color: Colors.grey),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1044,39 +755,282 @@ class _TvHomePageState extends State<TvHomePage> {
             onNavSelected: (index) => setState(() => _selectedNavIndex = index),
           ),
           Expanded(
-            child: _selectedNavIndex == 2 // 首页
-                ? Column(
+            // --- 关键修改点：使用 IndexedStack 替代原来的 switch-case ---
+            child: IndexedStack(
+              index: _selectedNavIndex,
               children: [
-                TopHeader(
-                  selectedIndex: _selectedTopIndex,
-                  onTabChanged: _onTopTabChanged,
-                  firstTabNode: _firstTabNode,
-                  showPrivate: _isPrivateUnlocked,
-                ),
-                if (_selectedTopIndex == 0 && !_isWeekLoading)
-                  _buildWeekBar(),
-                Expanded(
-                  child: (_selectedTopIndex == 0 && _isWeekLoading)
-                      ? const Center(child: CircularProgressIndicator())
-                      : _buildHomeContent(),
-                ),
+                SearchPage(onUnlockPrivate: _unlockPrivateMode), // Index 0
+                const PersonalCenterPage(),                     // Index 1
+                _buildNestedHomeView(),                        // Index 2: 首页
+                const SettingsPage(),                          // Index 3
               ],
-            )
-                : _selectedNavIndex == 0
-                ? SearchPage(onUnlockPrivate: _unlockPrivateMode)
-                : _selectedNavIndex == 1
-                ? const PersonalCenterPage()
-            // 修改这里：第4个选项（索引3）显示设置页面
-                : const SettingsPage(),
+            ),
           ),
         ],
       ),
     );
   }
+  // 修改 _buildNestedHomeView，添加 PageStorageKey 保持滚动位置
+  Widget _buildNestedHomeView() {
+    return ListenableBuilder(
+      listenable: _homeController,
+      builder: (context, child) {
+        if (_homeController.isLoading) {
+          return const Center(child: CircularProgressIndicator(color: Colors.orange));
+        }
+        return ListView(
+          key: const PageStorageKey('home_scroll_view'),
+          cacheExtent: 1000,
+          padding: const EdgeInsets.symmetric(vertical: 30),
+          children: [
+            _buildBannerSection(),
+            const SizedBox(height: 10),
+
+            // --- 关键修改：标题与星期切换在同一行 ---
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // 装饰条 + 标题
+                  Container(
+                    width: 5,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: Colors.orange,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // 2. 标题文字
+                  const Text(
+                      "新番表",
+                      style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      )
+                  ),
+
+                  // 星期切换按钮（占据剩余所有空间）
+                  Expanded(
+                    child: _buildWeekTabs(),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 25), // 增加一点和网格的间距
+            _buildWeeklyGridView(),
+          ],
+        );
+      },
+    );
+  }
+  // 板块1：轮播图 (Banner)
+  Widget _buildBannerSection() {
+    if (_homeController.banners.isEmpty) return const SizedBox.shrink();
+    return SizedBox(
+      height: 310, // 稍微加高，更具视觉冲击力
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        //padding: const EdgeInsets.symmetric(horizontal: 40), // 与网格对齐
+        itemCount: _homeController.banners.length,
+        cacheExtent: 1000,
+        itemBuilder: (context, index) {
+          final item = _homeController.banners[index];
+          return FocusableWidget(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => AnimeDetailPage(url: item.url)),
+            ),
+            builder: (context, focused) {
+              return AnimatedScale(
+                scale: focused ? 1.03 : 1.0,
+                duration: const Duration(milliseconds: 200),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 620, // 宽屏比例更像电影海报
+                  //动态设置第一个和最后一个元素的 margin ---
+                  margin: EdgeInsets.only(
+                    left: index == 0 ? 40 : 0, // 只有第一项左边留 40
+                    right: index == _homeController.banners.length - 1 ? 40 : 25, // 最后一项右边留 40，其他留 25
+                    top: 10,
+                    bottom: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    // 焦点状态下的发光阴影
+                    boxShadow: focused ? [
+                      BoxShadow(
+                        color: Colors.orange.withOpacity(0.3),
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                      )
+                    ] : [],
+                  ),
+                  child: Stack(
+                    children: [
+                      // 1. 底层图片
+                      Positioned.fill(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(20),
+                          child: Image.network(
+                            item.imageUrl,
+                            fit: BoxFit.cover,
+                            gaplessPlayback: true,
+                          ),
+                        ),
+                      ),
+                      // 2. 增强版遮罩：三段渐变（底部最黑，中间半透，顶部全透）
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(20),
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              stops: const [0.0, 0.4, 0.8],
+                              colors: [
+                                Colors.black.withOpacity(0.9),
+                                Colors.black.withOpacity(0.3),
+                                Colors.transparent,
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // 3. 内容层
+                      Positioned(
+                        left: 25,
+                        bottom: 25,
+                        right: 25,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // 顶部的一个小胶囊标签（用于显示备注）
+                            if (item.note.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                margin: const EdgeInsets.only(bottom: 10),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  item.note,
+                                  style: const TextStyle(
+                                    color: Colors.black,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            Text(
+                              item.title,
+                              style: const TextStyle(
+                                fontSize: 30, // 标题加大
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                                letterSpacing: 1.2,
+                                shadows: [Shadow(blurRadius: 10, color: Colors.black, offset: Offset(2, 2))],
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      // 4. 焦点边框 (更显眼的橙色边框)
+                      Positioned.fill(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: focused ? Colors.orange : Colors.white.withOpacity(0.1),
+                              width: focused ? 4 : 1,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+  // 板块2：星期切换 Tab
+  Widget _buildWeekTabs() {
+    if (_homeController.weeklyAnime.isEmpty) return const SizedBox.shrink();
+    return Container(
+      height: 45,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 35),
+        itemCount: _homeController.weeklyAnime.length,
+        itemBuilder: (context, index) {
+          bool isSelected = _homeController.selectedWeekIndex == index;
+          return FocusableWidget(
+            onTap: () => _homeController.changeWeek(index),
+            builder: (context, focused) {
+              return Container(
+                margin: const EdgeInsets.only(right: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 25),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: focused ? Colors.white : (isSelected ? Colors.orange : Colors.white10),
+                  borderRadius: BorderRadius.circular(25),
+                ),
+                child: Text(
+                  _homeController.weeklyAnime[index].day,
+                  style: TextStyle(
+                    color: focused ? Colors.black : Colors.white,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+  // 板块3：新番列表网格
+  Widget _buildWeeklyGridView() {
+    if (_homeController.weeklyAnime.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 40),
+      // 使用 IndexedStack 保持每一页的状态
+      child: IndexedStack(
+        index: _homeController.selectedWeekIndex,
+        children: _homeController.weeklyAnime.map((weekData) {
+          return GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 5,
+              crossAxisSpacing: 20,
+              mainAxisSpacing: 30,
+              childAspectRatio: 0.7,
+            ),
+            itemCount: weekData.items.length,
+            // 关键：给每一个 GridView 加上唯一的 Key，帮助 Flutter 识别
+            key: PageStorageKey('week_${weekData.day}'),
+            itemBuilder: (context, index) => VideoCard(anime: weekData.items[index]),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
 }
 
 
-// --- 新增：设置页面 (线路切换) ---
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
   @override
@@ -1098,6 +1052,9 @@ class _SettingsPageState extends State<SettingsPage> {
     _retryBtnNode.dispose();
     super.dispose();
   }
+
+
+
   Future<void> _loadRoutes() async {
     setState(() => _isLoading = true);
     var routes = await AnimeApiService.fetchAvailableRoutes();

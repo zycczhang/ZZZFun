@@ -8,6 +8,12 @@ class RouteItem {
   RouteItem({required this.name, required this.url});
 }
 
+class HomeData {
+  final List<AnimeItem> banners;
+  final List<WeeklyData> weeklyAnime;
+  HomeData({required this.banners, required this.weeklyAnime});
+}
+
 //搜索结果模型
 class SearchResult {
   final List<AnimeItem> items;
