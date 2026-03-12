@@ -756,6 +756,8 @@ class _TvHomePageState extends State<TvHomePage> {
           ),
           Expanded(
             // --- 关键修改点：使用 IndexedStack 替代原来的 switch-case ---
+            //IndexedStack 会在启动时立即初始化所有子页面（搜索、个人中心、设置）。
+            //全部加载完成后效果还不错，但是内存占用会变大，初始加载时间会边长，但懒加载的话切个界面就转半天也不舒服
             child: IndexedStack(
               index: _selectedNavIndex,
               children: [
