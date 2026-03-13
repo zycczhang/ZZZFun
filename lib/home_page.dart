@@ -1057,14 +1057,31 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // --- 新增：检查版本的方法 ---
   Future<void> _checkAppVersion() async {
-    bool update = await VersionService.hasUpdate();
-    var local = await VersionService.getLocalVersion();
+    // 1. 先拿本地版本
+    final localData = await VersionService.getLocalVersion();
+    // 强制转换为 int（防止 JSON 里写的是字符串或数字类型不匹配）
+    int localV = int.tryParse(localData['latestVersion'].toString()) ?? 0;
+    // 2. 再拿远程版本
+    final remoteData = await VersionService.getRemoteVersion();
     if (mounted) {
       setState(() {
-        _hasNewVersion = update;
-        _versionText = update
-            ? "有新版本可用 (v${local['latestVersion']})"
-            : "当前是最新版本 (v${local['latestVersion']})";
+        if (remoteData == null) {
+          // 情况 A：远程获取失败
+          _hasNewVersion = false;
+          _versionText = "最新版本获取失败 (当前: v$localV)";
+        } else {
+          int remoteV = int.tryParse(remoteData['latestVersion'].toString()) ?? 0;
+
+          if (remoteV > localV) {
+            // 情况 B：有更新
+            _hasNewVersion = true;
+            _versionText = "有新版本可用 (v$localV -> v$remoteV)";
+          } else {
+            // 情况 C：已经是最新
+            _hasNewVersion = false;
+            _versionText = "当前是最新版本 (v$localV)";
+          }
+        }
       });
     }
   }

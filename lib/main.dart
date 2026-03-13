@@ -16,7 +16,6 @@ void main() async {
       await AnimeApiService.init();
 
       runApp(const MyApp());
-
       Future.delayed(Duration(seconds: 1), () {
         WebServerService.startServer();
         HeadlessWeb.init();
