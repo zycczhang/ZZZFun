@@ -6,6 +6,10 @@
 
 这是一个基于 Flutter 开发的 **Omofun** 动漫网站第三方客户端，专为 **Android TV** 和 **投影仪** 等大屏设备设计。项目完全适配遥控器操作，拥有流畅的焦点动画、内置Web服务器控制台以及完善的播放体验。
 
+> 项目地址：
+> GitHub：[https://github.com/zycczhang/ZycFun](https://github.com/zycczhang/ZycFun)
+> Gitee：[https://gitee.com/zyc1522416243/zycfun](https://gitee.com/zyc1522416243/zycfun)
+
 ![示例](assets/p1.png)
 ![示例](assets/p3.png)
 ## ✨ 主要功能
@@ -42,6 +46,7 @@
 1.  克隆仓库：
     ```bash
     git clone https://github.com/zycczhang/ZycFun.git
+    git clone https://gitee.com/zyc1522416243/zycfun.git
     ```
 
 2.  安装依赖：
