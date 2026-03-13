@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'anime_nav_widgets.dart';
 import 'anime_detail_page.dart';
 import 'web_server_service.dart';
@@ -51,32 +52,14 @@ class VideoCard extends StatelessWidget {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      Image.network(
-                        anime.imageUrl.isNotEmpty
-                            ? anime.imageUrl
-                            : "${AnimeApiService.baseUrl}/template/mxpro/mxtheme/images/load.gif",
+                      CachedNetworkImage(
+                        imageUrl: anime.imageUrl,
                         fit: BoxFit.cover,
-                        // 关键属性：防止图片重建时闪烁
-                        gaplessPlayback: true,
-                        // 可选：添加加载占位符优化体验
-                        loadingBuilder: (context, child, loadingProgress) {
-                          if (loadingProgress == null) return child;
-                          return Center(
-                            child: CircularProgressIndicator(
-                              color: Colors.orange,
-                              strokeWidth: 2,
-                              value: loadingProgress.expectedTotalBytes != null
-                                  ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
-                                  : null,
-                            ),
-                          );
-                        },
-                        // 可选：加载失败时显示错误图标
-                        errorBuilder: (context, error, stackTrace) {
-                          return const Center(
-                            child: Icon(Icons.broken_image, color: Colors.white30, size: 30),
-                          );
-                        },
+                        placeholder: (context, url) => Container(color: Colors.grey[900]),
+                        errorWidget: (context, url, error) => const Icon(Icons.error),
+                        // 关键：TV端建议设置较小的内存缓存限制
+                        memCacheWidth: 300,
+                        memCacheHeight: 420,
                       ),
                       // 4. 将原有的 note 标签移到 Stack 中，保持在图片上方
                       if (anime.note.isNotEmpty)
@@ -359,7 +342,6 @@ class SearchPage extends StatefulWidget {
   @override
   State<SearchPage> createState() => _SearchPageState();
 }
-
 class _SearchPageState extends State<SearchPage> {
   final TextEditingController _controller = TextEditingController();
 
@@ -877,10 +859,26 @@ class _TvHomePageState extends State<TvHomePage> {
                       Positioned.fill(
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(20),
-                          child: Image.network(
-                            item.imageUrl,
+                          child: CachedNetworkImage(
+                            imageUrl: item.imageUrl,
                             fit: BoxFit.cover,
-                            gaplessPlayback: true,
+                            // 针对 TV 端的性能优化
+                            memCacheWidth: 1000, // 限制解码后的内存占用
+                            maxWidthDiskCache: 1200, // 限制磁盘缓存的分辨率
+                            fadeOutDuration: const Duration(milliseconds: 300),
+                            fadeInDuration: const Duration(milliseconds: 500),
+                            // 加载时的占位图
+                            placeholder: (context, url) => Container(
+                              color: const Color(0xFF1E1E1E),
+                              child: const Center(
+                                child: CircularProgressIndicator(color: Colors.orange, strokeWidth: 2),
+                              ),
+                            ),
+                            // 错误时的占位图
+                            errorWidget: (context, url, error) => Container(
+                              color: const Color(0xFF1E1E1E),
+                              child: const Icon(Icons.broken_image, color: Colors.white24, size: 50),
+                            ),
                           ),
                         ),
                       ),

@@ -44,6 +44,7 @@ dependencies:
   network_info_plus: ^6.1.0 # 用于获取本机IP显示给用户
   shelf_cors_headers: ^0.1.5
   flutter_inappwebview: ^6.1.5
+  cached_network_image: ^3.4.1 #网络图像本地缓存
 dev_dependencies:
   flutter_test:
     sdk: flutter

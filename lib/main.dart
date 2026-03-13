@@ -14,19 +14,20 @@ void main() async {
 
       await WakelockPlus.enable();
       await AnimeApiService.init();
-      await WebServerService.startServer();
-
-      //无头浏览器
-      HeadlessWeb.init();
 
       runApp(const MyApp());
+
+      Future.delayed(Duration(seconds: 1), () {
+        WebServerService.startServer();
+        HeadlessWeb.init();
+      });
+
     },
     zoneSpecification: ZoneSpecification(
       // 重写 print 方法
       print: (Zone self, ZoneDelegate parent, Zone zone, String line) {
         // 1. 执行原始的 print (输出到 Android Studio/VSCode 控制台)
         parent.print(zone, line);
-
         // 2. 发送到 Web Server 的日志缓冲区
         WebServerService.addLog(line);
       },

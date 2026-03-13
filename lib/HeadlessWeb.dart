@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+//部分视频线路靠解析http响应无法获取视频链接，引入无头浏览器
 class HeadlessWeb {
   static HeadlessInAppWebView? _headlessWebView;
   static InAppWebViewController? _controller;
