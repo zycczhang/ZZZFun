@@ -12,6 +12,7 @@
 
 ![示例](assets/p1.png)
 ![示例](assets/p3.png)
+
 ## ✨ 主要功能
 
 *   **📺 TV 专属交互**：全套 UI 适配遥控器焦点移动（D-Pad Navigation），操作逻辑符合大屏习惯。
@@ -29,6 +30,7 @@
     *   远程管理收藏夹内容。
     *   远程查看运行日志（方便在 TV 无调试环境时排错）。
     *   远程切换线路。
+
 *   **📂 内容管理**：
     *   周更表、分类库（动画/电影/电视剧/综艺）。
     *   搜索功能（支持 ID 直达和关键字搜索）。
@@ -39,10 +41,12 @@
 ## 🚀 快速开始
 
 ### 开发环境
+
 *   Flutter SDK: >=3.0.0
 *   Android Studio / VS Code
 
 ### 运行步骤
+
 1.  克隆仓库：
     ```bash
     git clone https://github.com/zycczhang/ZycFun.git
@@ -54,13 +58,14 @@
     flutter pub get
     ```
 
-3.  连接 Android TV 或 模拟器进行调试：
+3.  连接 Android TV 或模拟器进行调试：
     ```bash
     flutter run
     ```
-   
+
 ## 🙋‍♂️ 开发者说明
-本人并不了解Flutter框架，该项目大部分代码由ai生成。项目仍有很多可优化的空间<del>(重构吧)</del>，欢迎各位开发者提 Issue/PR 一起完善，感谢支持！
+
+本人并不了解Flutter框架，该项目大部分代码由AI生成。项目仍有很多可优化的空间，欢迎各位开发者提 Issue/PR 一起完善，感谢支持！
 
 
  ## 免责声明
