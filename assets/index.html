@@ -54,7 +54,14 @@
 </div>
 
 <div id="fav-page" class="page">
-    <h2>我的收藏</h2>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2>我的收藏</h2>
+        <div>
+            <button class="btn-sm" onclick="exportFavorites()" style="background:#444; color:white;">导出收藏</button>
+            <button class="btn-sm" onclick="triggerImport()" style="background:#444; color:white;">导入收藏</button>
+            <input type="file" id="import-file" style="display:none" onchange="handleImport(this)" accept=".json">
+        </div>
+    </div>
     <div id="fav-list">加载中...</div>
 </div>
 
@@ -245,6 +252,72 @@
         } catch (e) {
             alert('操作失败');
         }
+    }
+
+    // --- 导出功能 ---
+    async function exportFavorites() {
+        try {
+            const res = await fetch(`${baseUrl}/api/favorites`);
+            const data = await res.json();
+
+            if (data.length === 0) {
+                alert("收藏夹是空的，没什么可导出的。");
+                return;
+            }
+            // 创建 Blob 对象
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            // 创建隐藏的下载链接
+            const a = document.createElement('a');
+            a.href = url;
+            const date = new Date().toISOString().split('T')[0];
+            a.download = `my_anime_favorites_${date}.json`;
+            document.body.appendChild(a);
+            a.click();
+
+            // 清理
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            alert("导出失败: " + e);
+        }
+    }
+    // --- 导入功能 ---
+    function triggerImport() {
+        // 触发隐藏的 file input 点击
+        document.getElementById('import-file').click();
+    }
+    async function handleImport(input) {
+        const file = input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const json = JSON.parse(e.target.result);
+                if (!Array.isArray(json)) {
+                    throw new Error("无效的格式：必须是一个数组");
+                }
+                if (!confirm(`确定要导入这 ${json.length} 个收藏吗？这会覆盖你目前的收藏列表！`)) {
+                    input.value = ''; // 重置 input
+                    return;
+                }
+                const res = await fetch(`${baseUrl}/api/favorites/import`, {
+                    method: 'POST',
+                    body: JSON.stringify(json)
+                });
+                if (res.ok) {
+                    alert("导入成功！TV端已同步刷新。");
+                    loadFavorites(); // 刷新当前网页的列表
+                } else {
+                    alert("导入失败，服务器响应错误。");
+                }
+            } catch (err) {
+                alert("导入失败，文件格式不正确: " + err);
+            }
+            input.value = ''; // 重置 input
+        };
+        reader.readAsText(file);
     }
 </script>
 </body>

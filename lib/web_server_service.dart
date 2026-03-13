@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/services.dart' show rootBundle; // 必须引入这个用于读取 Assets
+import 'package:flutter/foundation.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as io;
 import 'package:shelf_router/shelf_router.dart';
@@ -9,6 +10,7 @@ import 'package:shelf_cors_headers/shelf_cors_headers.dart';
 import 'models/anime_models.dart';
 import 'services/anime_api_service.dart';
 import 'services/anime_storage_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 // ServerEventBus 保持不变
 class ServerEventBus {
   static final StreamController<String> _controller = StreamController.broadcast();
@@ -20,7 +22,9 @@ class ServerEventBus {
 
 class WebServerService {
   static HttpServer? _server;
-  static String serverUrl = "未启动";
+  static final ValueNotifier<String> serverUrlNotifier = ValueNotifier("未启动");
+  // 为了方便其他地方调用，可以保留一个 getter (可选)
+  static String get serverUrl => serverUrlNotifier.value;
 
   // --- 新增：日志缓冲区 ---
   static final List<String> _logBuffer = [];
@@ -165,6 +169,30 @@ class WebServerService {
       addLog("日志已清空");
       return Response.ok("cleared");
     });
+    // 9. API: 批量导入收藏
+    router.post('/api/favorites/import', (Request request) async {
+      try {
+        String content = await request.readAsString();
+        List<dynamic> jsonList = jsonDecode(content);
+
+        // 转换并验证数据
+        final prefs = await Stream.fromIterable([await SharedPreferences.getInstance()]).first;
+        // 直接覆盖现有的收藏列表
+        // 注意：这里我们直接存储原始的 json 字符串，AnimeStorageService 读取时会解析
+        await prefs.setString('anime_favorites', content);
+
+        addLog("导入收藏成功，共 ${jsonList.length} 条记录");
+
+        // 发送事件通知 TV 端刷新页面
+        ServerEventBus.emit(ServerEventBus.eventRefreshData);
+
+        return Response.ok("success");
+      } catch (e) {
+        addLog("导入收藏失败: $e");
+        return Response.internalServerError(body: e.toString());
+      }
+    });
+
 
     final handler = const Pipeline()
         .addMiddleware(corsHeaders())
@@ -185,13 +213,14 @@ class WebServerService {
           }
         }
       }
-      serverUrl = "http://$ip:8080";
+      // 2. 更新 ValueNotifier 的值，这会自动通知所有监听者
+      serverUrlNotifier.value = "http://$ip:8080";
       addLog('Web Server 启动成功: $serverUrl');
       print('Web Server running at $serverUrl');
     } catch (e) {
       addLog("Server 启动失败: $e");
+      serverUrlNotifier.value = "启动失败: $e";
       print("Server start error: $e");
-      serverUrl = "启动失败: $e";
     }
   }
 
@@ -199,6 +228,7 @@ class WebServerService {
     addLog("Web Server 已停止");
     _server?.close(force: true);
     _server = null;
+    serverUrlNotifier.value = "已停止";
   }
 
   // 读取 Assets 中的首页文件

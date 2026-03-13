@@ -1143,8 +1143,21 @@ class _SettingsPageState extends State<SettingsPage> {
               const Text("网页线路设置",
                   style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
               const SizedBox(width: 40),
-              Text("网页控制台：${WebServerService.serverUrl}",
-                  style: const TextStyle(fontSize: 18, color: Colors.white70)),
+
+              ValueListenableBuilder<String>(
+                valueListenable: WebServerService.serverUrlNotifier,
+                builder: (context, url, child) {
+                  return Text(
+                    "网页控制台：$url",
+                    style: TextStyle(
+                        fontSize: 18,
+                        color: url.contains("http") ? Colors.greenAccent : Colors.white70
+                    ),
+                  );
+                },
+              ),
+
+
               const Spacer(),
               // 刷新按钮
               _buildIconButton(
@@ -1228,7 +1241,7 @@ class _SettingsPageState extends State<SettingsPage> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children:[
-              Text("提示：如果没有数据，请尝试切换其他线路", style: TextStyle(color: Colors.grey)),
+              Text("问题反馈:zycczhang@qq.com", style: TextStyle(color: Colors.grey)),
               Text(
                 _versionText,
                 style: TextStyle(
