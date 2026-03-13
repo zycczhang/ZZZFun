@@ -9,6 +9,7 @@ import 'models/anime_models.dart';
 import 'controllers/home_controller.dart';
 import 'services/anime_api_service.dart';
 import 'services/anime_storage_service.dart';
+import 'services/version_service.dart';
 // VideoCard 类 - 包含AI的修改（传递播放进度、样式优化）
 class VideoCard extends StatelessWidget {
   final AnimeItem anime;
@@ -1040,29 +1041,49 @@ class _SettingsPageState extends State<SettingsPage> {
   List<RouteItem> _routes = [];
   bool _isLoading = true;
   String _currentUrl = "";
+
+  String _versionText = "正在检查版本...";
+  bool _hasNewVersion = false;
+
   final FocusNode _retryBtnNode = FocusNode();
+  final FocusNode _dropdownNode = FocusNode();
   @override
   void initState() {
     super.initState();
     _currentUrl = AnimeApiService.baseUrl;
     _loadRoutes();
+    _checkAppVersion(); // --- 新增：检查版本 ---
   }
+
+  // --- 新增：检查版本的方法 ---
+  Future<void> _checkAppVersion() async {
+    bool update = await VersionService.hasUpdate();
+    var local = await VersionService.getLocalVersion();
+    if (mounted) {
+      setState(() {
+        _hasNewVersion = update;
+        _versionText = update
+            ? "有新版本可用 (v${local['latestVersion']})"
+            : "当前是最新版本 (v${local['latestVersion']})";
+      });
+    }
+  }
+
   @override
   void dispose() {
     _retryBtnNode.dispose();
+    _dropdownNode.dispose();
     super.dispose();
   }
-
-
-
+  // --- 逻辑处理函数 ---
   Future<void> _loadRoutes() async {
     setState(() => _isLoading = true);
     var routes = await AnimeApiService.fetchAvailableRoutes();
-
     // 如果获取失败，至少保留当前正在使用的作为选项
     if (routes.isEmpty) {
       routes.add(RouteItem(name: "默认线路 (获取列表失败)", url: AnimeApiService.baseUrl));
     }
+
     if (mounted) {
       setState(() {
         _routes = routes;
@@ -1076,7 +1097,6 @@ class _SettingsPageState extends State<SettingsPage> {
     AnimeApiService.baseUrl = url;
     // 2. 持久化保存
     await AnimeStorageService.setBaseUrl(url);
-
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1087,149 +1107,205 @@ class _SettingsPageState extends State<SettingsPage> {
       );
     }
   }
+  // --- UI 构建 ---
   @override
   Widget build(BuildContext context) {
+    // 找到当前选中的 route 对象，用于界面显示
+    final currentRoute = _routes.firstWhere(
+          (e) => e.url == _currentUrl,
+      orElse: () => RouteItem(name: "请选择线路", url: _currentUrl),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // 顶部标题栏
         Padding(
           padding: const EdgeInsets.fromLTRB(40, 50, 40, 20),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("网页线路设置", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
-              Text("网页面板：${WebServerService.serverUrl}", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
+              const Text("网页线路设置",
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
+              const SizedBox(width: 40),
+              Text("网页控制台：${WebServerService.serverUrl}",
+                  style: const TextStyle(fontSize: 18, color: Colors.white70)),
+              const Spacer(),
               // 刷新按钮
-              FocusableWidget(
-                focusNode: _retryBtnNode,
+              _buildIconButton(
+                node: _retryBtnNode,
+                icon: Icons.refresh,
+                label: "刷新列表",
                 onTap: _loadRoutes,
-                builder: (context, focused) {
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: focused ? Colors.white : Colors.white10,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.refresh, color: focused ? Colors.black : Colors.white, size: 20),
-                        const SizedBox(width: 8),
-                        Text("刷新线路列表", style: TextStyle(color: focused ? Colors.black : Colors.white)),
-                      ],
-                    ),
-                  );
-                },
               ),
             ],
           ),
         ),
+        // 主要配置区域 (下拉框样式)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                const Text("当前选择线路：", style: TextStyle(color: Colors.white, fontSize: 18)),
+                const SizedBox(width: 20),
 
-        Expanded(
-          child: _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 10),
-            itemCount: _routes.length,
-            itemBuilder: (context, index) {
-              final route = _routes[index];
-              final isSelected = route.url == _currentUrl;
-              return FocusableWidget(
-                onTap: () => _changeRoute(route.url),
-                builder: (context, focused) {
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-                    decoration: BoxDecoration(
-                      // 选中状态给一个背景色，聚焦状态给白色高亮
-                      color: focused
-                          ? Colors.white
-                          : (isSelected ? Colors.orange.withOpacity(0.2) : Colors.white10),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: isSelected ? Colors.orange : Colors.transparent,
-                        width: 2,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        // 模拟 Radio Button
-                        Container(
-                          width: 20,
-                          height: 20,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                                color: focused
-                                    ? Colors.black
-                                    : (isSelected ? Colors.orange : Colors.white54),
-                                width: 2
-                            ),
-                          ),
-                          child: isSelected
-                              ? Center(child: Container(width: 10, height: 10, decoration: BoxDecoration(color: focused ? Colors.black : Colors.orange, shape: BoxShape.circle)))
-                              : null,
+                Expanded(
+                  child: _isLoading
+                      ? const Center(child: SizedBox(width: 30, height: 30, child: CircularProgressIndicator(strokeWidth: 2)))
+                      : FocusableWidget(
+                    focusNode: _dropdownNode,
+                    onTap: () => _showRoutePicker(context),
+                    builder: (context, focused) {
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: focused ? Colors.orange : Colors.white10,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: focused ? Colors.white : Colors.white24, width: 2),
                         ),
-                        const SizedBox(width: 20),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                route.name,
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: focused ? Colors.black : Colors.white,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                    currentRoute.name,
+                                    style: TextStyle(
+                                        color: focused ? Colors.black : Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16
+                                    )
                                 ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                route.url,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: focused ? Colors.black54 : Colors.white54,
+                                Text(
+                                    currentRoute.url,
+                                    style: TextStyle(
+                                        color: focused ? Colors.black54 : Colors.white54,
+                                        fontSize: 12
+                                    )
                                 ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        // 如果是当前选中，显示状态标签
-                        if (isSelected)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.orange,
-                              borderRadius: BorderRadius.circular(4),
+                              ],
                             ),
-                            child: const Text("当前使用", style: TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold)),
-                          ),
-                      ],
-                    ),
-                  );
-                },
-              );
-            },
+                            Icon(
+                                Icons.arrow_drop_down_circle_outlined,
+                                color: focused ? Colors.black : Colors.white
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-
+        const Spacer(),
+        // 底部提示栏
         Padding(
           padding: const EdgeInsets.all(40.0),
           child: Row(
-            // 关键属性：让子组件两端对齐
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
+            children:[
+              Text("提示：如果没有数据，请尝试切换其他线路", style: TextStyle(color: Colors.grey)),
               Text(
-                "提示：如果没有数据，请尝试切换其他线路。",
-                style: TextStyle(color: Colors.grey),
+                _versionText,
+                style: TextStyle(
+                  color: _hasNewVersion ? Colors.orange : Colors.grey,
+                  fontWeight: _hasNewVersion ? FontWeight.bold : FontWeight.normal,
+                ),
               ),
-              Text(
-                "项目地址：https://github.com/zycczhang/ZycFun",
-                style: TextStyle(color: Colors.grey),
-              ),
+              Text("项目地址：https://github.com/zycczhang/ZycFun", style: TextStyle(color: Colors.grey)),
             ],
           ),
         ),
       ],
+    );
+  }
+  // 辅助构建按钮小组件
+  Widget _buildIconButton({required FocusNode node, required IconData icon, required String label, required VoidCallback onTap}) {
+    return FocusableWidget(
+      focusNode: node,
+      onTap: onTap,
+      builder: (context, focused) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: focused ? Colors.white : Colors.white10,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: focused ? Colors.black : Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Text(label, style: TextStyle(color: focused ? Colors.black : Colors.white)),
+            ],
+          ),
+        );
+      },
+    );
+  }
+  // 弹出选择列表对话框 (针对TV遥控器优化)
+  void _showRoutePicker(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text("请选择可用线路", style: TextStyle(color: Colors.white)),
+        content: SizedBox(
+          width: 500, // TV端稍微宽一点
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _routes.length,
+            itemBuilder: (context, index) {
+              final route = _routes[index];
+              final isSelected = route.url == _currentUrl;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: FocusableWidget(
+                  onTap: () {
+                    _changeRoute(route.url);
+                    Navigator.pop(context);
+                  },
+                  builder: (context, focused) {
+                    return Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                          color: focused ? Colors.orange : (isSelected ? Colors.orange.withOpacity(0.1) : Colors.white.withOpacity(0.05)),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                              color: isSelected ? Colors.orange : Colors.transparent,
+                              width: 1
+                          )
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              route.name+route.url,
+                              style: TextStyle(
+                                  color: focused ? Colors.black : Colors.white,
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal
+                              ),
+                            ),
+                          ),
+                          if (isSelected)
+                            Icon(Icons.check_circle, size: 18, color: focused ? Colors.black : Colors.orange),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 }
