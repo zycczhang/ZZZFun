@@ -228,8 +228,15 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
   // --- 播放器控制条 ---
   Widget _buildPlayerControls({required bool isFull}) {
     final realPos = _controller.videoController?.value.position ?? Duration.zero;
+    // 核心：如果有目标位置，UI 显示目标位置，否则显示实际位置
     final displayPos = _controller.targetSeekPosition ?? realPos;
     final totalDuration = _controller.videoController?.value.duration ?? Duration.zero;
+
+    // 计算进度百分比 (0.0 到 1.0)
+    double progress = 0.0;
+    if (totalDuration.inMilliseconds > 0) {
+      progress = displayPos.inMilliseconds / totalDuration.inMilliseconds;
+    }
 
     return Positioned.fill(
       child: Container(
@@ -243,22 +250,64 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
+            // 顶部条
             Padding(
               padding: const EdgeInsets.all(20),
               child: Row(
                 children: [
                   if (isFull) IconButton(onPressed: _controller.toggleFullScreen, icon: const Icon(Icons.arrow_back, color: Colors.white)),
                   Text(_controller.currentEpisodeName, style: const TextStyle(color: Colors.white, fontSize: 18)),
+                  // 屏幕中间的时间提示（快进时显眼显示）
                   if (_controller.isSeekingUI)
-                    Expanded(child: Center(child: Text(_controller.formatDuration(displayPos), style: const TextStyle(color: Colors.orange, fontSize: 24, fontWeight: FontWeight.bold)))),
+                    Expanded(
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                          decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(10)),
+                          child: Text(
+                            _controller.formatDuration(displayPos),
+                            style: const TextStyle(color: Colors.orange, fontSize: 40, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
+
+            // 底部控制区
             Column(
               children: [
+                // 自定义进度条，解决官方进度条不动的问题
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: VideoProgressIndicator(_controller.videoController!, allowScrubbing: true, colors: const VideoProgressColors(playedColor: Colors.orange)),
+                  child: Stack(
+                    children: [
+                      // 背景槽
+                      Container(
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      // 缓冲条（可选，这里用实线表示）
+                      // 播放进度条
+                      FractionallySizedBox(
+                        widthFactor: progress.clamp(0.0, 1.0),
+                        child: Container(
+                          height: 4,
+                          decoration: BoxDecoration(
+                              color: Colors.orange,
+                              borderRadius: BorderRadius.circular(2),
+                              boxShadow: [
+                                BoxShadow(color: Colors.orange.withOpacity(0.5), blurRadius: 4)
+                              ]
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
@@ -266,9 +315,16 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
                     children: [
                       Icon(_controller.videoController!.value.isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white),
                       const SizedBox(width: 10),
-                      Text("${_controller.formatDuration(displayPos)} / ${_controller.formatDuration(totalDuration)}", style: const TextStyle(color: Colors.white)),
+                      // 这里也使用 displayPos，确保时间随进度条一起动
+                      Text(
+                        "${_controller.formatDuration(displayPos)} / ${_controller.formatDuration(totalDuration)}",
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                      ),
                       const Spacer(),
-                      IconButton(icon: Icon(isFull ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.white), onPressed: _controller.toggleFullScreen),
+                      IconButton(
+                          icon: Icon(isFull ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.white),
+                          onPressed: _controller.toggleFullScreen
+                      ),
                     ],
                   ),
                 )

@@ -143,34 +143,76 @@ class AnimeDetailController extends ChangeNotifier {
   }
 
   // 快进逻辑
+  DateTime? _lastSeekTime;
+  int _seekAccelerationCount = 0; // 连续按键计数器
   void handleKeySeek(bool forward) {
     if (videoController == null || !videoController!.value.isInitialized) return;
-
+    final totalDuration = videoController!.value.duration;
+    if (totalDuration == Duration.zero) return;
+    // 1. 确定最高倍率限制 (根据视频长度)
+    // 规则：<=30分钟(24分番剧)最高5倍；>=120分钟(电影)最高10倍；中间线性过渡
+    int maxMultiplierLimit;
+    double totalMinutes = totalDuration.inMinutes.toDouble();
+    if (totalMinutes <= 30) {
+      maxMultiplierLimit = 5;
+    } else if (totalMinutes >= 120) {
+      maxMultiplierLimit = 10;
+    } else {
+      // 30~120分钟之间，从5倍线性增加到10倍
+      maxMultiplierLimit = 5 + ((totalMinutes - 30) / 90 * 5).round();
+    }
+    // 2. 初始化/处理连续按键逻辑
     if (targetSeekPosition == null) {
       targetSeekPosition = videoController!.value.position;
-      isSeekingUI = true;
+      _seekAccelerationCount = 0;
     }
+    DateTime now = DateTime.now();
+    // 如果两次按键间隔小于 350ms，视为长按/连按
+    if (_lastSeekTime != null && now.difference(_lastSeekTime!).inMilliseconds < 350) {
+      _seekAccelerationCount++;
+    } else {
+      _seekAccelerationCount = 0; // 间隔太长，重置回 1 倍速
+    }
+    _lastSeekTime = now;
+    // 3. 计算当前倍率
+    // 每连续触发 3 次，倍率增加 1 (这样加速感更平滑)
+    int currentMultiplier = 1 + (_seekAccelerationCount ~/ 3);
+    if (currentMultiplier > maxMultiplierLimit) {
+      currentMultiplier = maxMultiplierLimit;
+    }
+    // 4. 计算并应用位移：基础5秒 * 当前倍率
+    final stepSeconds = 5 * currentMultiplier;
+    final step = Duration(seconds: stepSeconds);
 
-    final step = const Duration(seconds: 5);
-    targetSeekPosition = forward ? targetSeekPosition! + step : targetSeekPosition! - step;
-
+    isSeekingUI = true;
+    if (forward) {
+      targetSeekPosition = targetSeekPosition! + step;
+    } else {
+      targetSeekPosition = targetSeekPosition! - step;
+    }
     // 边界检查
     if (targetSeekPosition! < Duration.zero) targetSeekPosition = Duration.zero;
-    if (targetSeekPosition! > videoController!.value.duration) targetSeekPosition = videoController!.value.duration;
-
-    _seekDebounceTimer?.cancel();
+    if (targetSeekPosition! > totalDuration) targetSeekPosition = totalDuration;
+    // 5. 更新 UI
     showPlayerControls = true;
     _controlHideTimer?.cancel();
     notifyListeners();
+    // 6. 防抖执行 Seek
+    _seekDebounceTimer?.cancel();
+    _seekDebounceTimer = Timer(const Duration(milliseconds: 500), () async {
+      if (targetSeekPosition != null) {
+        isVideoBuffering = true;
+        notifyListeners();
 
-    _seekDebounceTimer = Timer(const Duration(milliseconds: 400), () async {
-      isVideoBuffering = true;
-      notifyListeners();
-      await videoController!.seekTo(targetSeekPosition!);
-      isSeekingUI = false;
-      targetSeekPosition = null;
-      resetControlTimer();
-      notifyListeners();
+        await videoController!.seekTo(targetSeekPosition!);
+
+        // 完成跳转，重置所有状态
+        isSeekingUI = false;
+        targetSeekPosition = null;
+        _seekAccelerationCount = 0;
+        resetControlTimer();
+        notifyListeners();
+      }
     });
   }
 

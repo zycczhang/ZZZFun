@@ -738,22 +738,27 @@ class _TvHomePageState extends State<TvHomePage> {
             onNavSelected: (index) => setState(() => _selectedNavIndex = index),
           ),
           Expanded(
-            // --- 关键修改点：使用 IndexedStack 替代原来的 switch-case ---
-            //IndexedStack 会在启动时立即初始化所有子页面（搜索、个人中心、设置）。
-            //全部加载完成后效果还不错，但是内存占用会变大，初始加载时间会边长，但懒加载的话切个界面就转半天也不舒服
-            child: IndexedStack(
-              index: _selectedNavIndex,
-              children: [
-                SearchPage(onUnlockPrivate: _unlockPrivateMode), // Index 0
-                const PersonalCenterPage(),                     // Index 1
-                _buildNestedHomeView(),                        // Index 2: 首页
-                const SettingsPage(),                          // Index 3
-              ],
-            ),
+            // 换回 switch case 实现页面切换
+            child: _buildPageContent(),
           ),
         ],
       ),
     );
+  }
+  Widget _buildPageContent() {
+    switch (_selectedNavIndex) {
+      case 0:
+        return SearchPage(onUnlockPrivate: _unlockPrivateMode);
+      case 1:
+        return const PersonalCenterPage();
+      case 2:
+        return _buildNestedHomeView();
+      case 3:
+        return const SettingsPage();
+      default:
+      // 兜底页面，防止索引越界
+        return const Center(child: Text("页面不存在"));
+    }
   }
   // 修改 _buildNestedHomeView，添加 PageStorageKey 保持滚动位置
   Widget _buildNestedHomeView() {
