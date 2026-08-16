@@ -1,5 +1,7 @@
 # ZycFun TV - Android TV/投影仪第三方客户端 (Flutter)
 
+#  omofun倒闭，项目终止(இ﹏இ`)
+
 [![Flutter](https://img.shields.io/badge/Flutter-3.0%2B-blue.svg)](https://flutter.dev)
 [![Platform](https://img.shields.io/badge/Platform-Android%20TV-green.svg)](https://www.android.com/tv/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
