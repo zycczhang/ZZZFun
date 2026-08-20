@@ -15,27 +15,7 @@ ZZZFun 是一个面向 Android TV、投影仪和桌面端的 Flutter 动漫元�
 - 日志支持 debug、info、warning、error 等级以及持久化查看
 - 适配 Android TV、模拟器、移动设备和桌面窗口布局
 
-## 数据来源
 
-当前使用 Bangumi API 的公开反向代理访问元数据：
-
-- API：`https://bgmapi.anibt.net`
-- 图片：`https://bgmimg.anibt.net`
-- 项目中使用的主要接口：
-  - `POST /v0/search/subjects`：当前季度热门番剧
-  - `GET /calendar`：每周放送日历
-  - `GET /v0/subjects/{id}`：番剧详情
-  - `GET /v0/episodes`：剧集列表
-
-反向代理来源说明：[Bangumi 反向代理](https://catcat.blog/2026/05/bangumi-reverse-proxy)。
-代理或 Bangumi 服务不可用时，界面会显示获取失败状态，不使用本地预览数据替代网络结果。
-
-## 当前未实现
-
-- 真实播放源和视频播放
-- 资源站规则解析
-- 搜索页面和完整番剧详情页面
-- 播放线路选择与弹幕功能
 
 ## 开发环境
 
