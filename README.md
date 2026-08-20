@@ -1,7 +1,24 @@
-# ZZZFun
 
-ZZZFun 是一个面向 Android TV、投影仪和桌面端的 Flutter 动漫元数据与片单应用。
-项目由原 ZycFun 重构而来，当前重点是稳定的跨平台界面、遥控器交互、本地片单和 Bangumi 元数据接入。
+
+
+<div align=center>
+
+<h1>ZZZFun</h1>
+
+<img src="icon.png" width=200></img>
+
+<a href="https://t.me/kazumi_app"><img src="https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white"></img></a>
+
+<img src="https://img.shields.io/badge/Flutter-03A9F4?style=for-the-badge&logo=flutter&logoColor=white"></img>
+<img src="https://img.shields.io/badge/Dart-00B4AB?style=for-the-badge&logo=Dart&logoColor=white"></img>
+
+<a href="https://trendshift.io/repositories/11432"><img src="https://trendshift.io/api/badge/trendshift/repositories/11432/yearly?language=Dart"></img></a>
+<a href="https://hellogithub.com/repository/Predidit/Kazumi" target="_blank"><img src="https://abroad.hellogithub.com/v1/widgets/recommend.svg?rid=68d824ea55ee4b07aba6fe1dd61ac939&claim_uid=J9Qu6aDd8LT1nU0"/></img></a>
+
+<p>使用 Flutter 开发的基于自定义规则的番剧采集与在线观看程序。使用最多五行基于 <code>Xpath</code> 语法的选择器构建自己的规则。支持规则导入与规则分享。支持基于 <co</p>
+</div>
+
+## 屏幕截图
 ![示例](assets/1.webp)
 ![示例](assets/2.webp)
 ## 当前功能
