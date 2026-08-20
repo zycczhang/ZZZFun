@@ -2,7 +2,8 @@
 
 ZZZFun 是一个面向 Android TV、投影仪和桌面端的 Flutter 动漫元数据与片单应用。
 项目由原 ZycFun 重构而来，当前重点是稳定的跨平台界面、遥控器交互、本地片单和 Bangumi 元数据接入。
-
+![示例](assets/p1.png)
+![示例](assets/p3.png)
 ## 当前功能
 
 - 首页展示当前季度热门番剧，按 Bangumi 热度排序
