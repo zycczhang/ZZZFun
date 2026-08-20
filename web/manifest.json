@@ -1,12 +1,12 @@
 {
-    "name": "test1",
-    "short_name": "test1",
+    "name": "ZZZFun",
+    "short_name": "ZZZFun",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#0E1014",
+    "theme_color": "#FFA116",
+    "description": "ZZZFun local anime library",
+    "orientation": "landscape",
     "prefer_related_applications": false,
     "icons": [
         {

@@ -1,5 +1,5 @@
-name: ZYCFun
-description: "zyc omoFun"
+name: zzzfun
+description: "ZZZFun - a local-first anime library shell"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -33,18 +33,10 @@ dependencies:
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.8
-  http: ^1.1.0
-  html: ^0.15.4
-  video_player: ^2.10.1
   shared_preferences: ^2.5.4
   wakelock_plus: ^1.4.0
-  shelf: ^1.4.1
-  shelf_router: ^1.1.4
-  network_info_plus: ^6.1.0 # 用于获取本机IP显示给用户
-  shelf_cors_headers: ^0.1.5
-  flutter_inappwebview: ^6.1.5
-  cached_network_image: ^3.4.1 #网络图像本地缓存
+  http: ^1.3.0
+  cached_network_image: ^3.4.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -62,9 +54,6 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
-  assets:
-    - assets/index.html
-    - assets/version.json
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.

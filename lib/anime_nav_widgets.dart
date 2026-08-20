@@ -1,16 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-// --- 通用UI组件：焦点处理（TV核心） ---
+
 class FocusableWidget extends StatefulWidget {
   final Widget Function(BuildContext context, bool focused) builder;
-  final VoidCallback onTap;
-  final FocusNode? focusNode; // 新增：允许传入外部 FocusNode
+  final VoidCallback? onTap;
+  final KeyEventResult Function(FocusNode node, KeyEvent event)? onKeyEvent;
+  final FocusNode? focusNode;
+  final bool autofocus;
+  final bool enabled;
 
   const FocusableWidget({
     super.key,
     required this.builder,
-    required this.onTap,
-    this.focusNode
+    this.onTap,
+    this.onKeyEvent,
+    this.focusNode,
+    this.autofocus = false,
+    this.enabled = true,
   });
 
   @override
@@ -18,146 +24,152 @@ class FocusableWidget extends StatefulWidget {
 }
 
 class _FocusableWidgetState extends State<FocusableWidget> {
-  bool _isFocused = false;
+  late final FocusNode _internalNode;
+  FocusNode get _node => widget.focusNode ?? _internalNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _internalNode = FocusNode(debugLabel: 'ZZZFunFocusable');
+    _node.addListener(_onFocusChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant FocusableWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusNode != widget.focusNode) {
+      oldWidget.focusNode?.removeListener(_onFocusChanged);
+      _node.addListener(_onFocusChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    _node.removeListener(_onFocusChanged);
+    _internalNode.dispose();
+    super.dispose();
+  }
+
+  void _onFocusChanged() {
+    if (mounted) setState(() {});
+  }
+
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (!widget.enabled) {
+      return KeyEventResult.ignored;
+    }
+    final customResult = widget.onKeyEvent?.call(node, event);
+    if (customResult != null && customResult != KeyEventResult.ignored) {
+      return customResult;
+    }
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.select ||
+        event.logicalKey == LogicalKeyboardKey.gameButtonA) {
+      widget.onTap?.call();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
 
   @override
   Widget build(BuildContext context) {
     return Focus(
-      focusNode: widget.focusNode, // 绑定传入的 node
-      onFocusChange: (hasFocus) => setState(() => _isFocused = hasFocus),
-      onKeyEvent: (node, event) {
-        if (_isFocused && event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select || event.logicalKey == LogicalKeyboardKey.enter)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
+      focusNode: _node,
+      autofocus: widget.autofocus,
+      canRequestFocus: widget.enabled,
+      onKeyEvent: _onKeyEvent,
       child: GestureDetector(
-        onTap: widget.onTap,
-        child: widget.builder(context, _isFocused),
+        onTap: widget.enabled
+            ? () {
+                _node.requestFocus();
+                widget.onTap?.call();
+              }
+            : null,
+        child: widget.builder(context, _node.hasFocus),
       ),
     );
   }
 }
 
-// --- UI组件：左侧导航栏（增加选中状态回调） ---
-class SideNavigation extends StatelessWidget {
-  final int selectedNavIndex;
-  final Function(int) onNavSelected;
+class SectionHeading extends StatelessWidget {
+  final String title;
+  final String? caption;
+  final Widget? trailing;
 
-  const SideNavigation({
+  const SectionHeading({
     super.key,
-    required this.selectedNavIndex,
-    required this.onNavSelected,
+    required this.title,
+    this.caption,
+    this.trailing,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 80,
-      color: const Color(0xFF1C1C1C),
-      child: Column(
-        children: [
-          const SizedBox(height: 40), // 顶部固定间距
-          // 核心修改：用Expanded包裹需要居中的图标，并设置居中对齐
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center, // 垂直居中
-              children: [
-                _buildNavIcon(0, Icons.search), // 0: 搜索
-                _buildNavIcon(1, Icons.person_outline), // 1: 个人
-                _buildNavIcon(2, Icons.home, isSelected: true), // 2: 首页
-              ],
-            ),
-          ),
-          // 底部的设置图标区域（保持原有位置）
-          _buildNavIcon(3, Icons.settings), // 3: 设置
-          const SizedBox(height: 20),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNavIcon(int index, IconData icon, {bool isSelected = false}) {
-    bool currentSelected = selectedNavIndex == index;
-    return FocusableWidget(
-      builder: (context, focused) {
-        return Container(
-          margin: const EdgeInsets.symmetric(vertical: 10),
-          padding: const EdgeInsets.all(10),
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 22,
           decoration: BoxDecoration(
-            color: focused ? Colors.white10 : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
+            color: Theme.of(context).colorScheme.primary,
+            borderRadius: BorderRadius.circular(2),
           ),
-          child: Icon(
-            icon,
-            color: focused || currentSelected ? Colors.white : Colors.grey,
-            size: 30,
-          ),
-        );
-      },
-      onTap: () => onNavSelected(index),
-    );
-  }
-}
-
-// --- UI组件：顶部标签栏 ---
-class TopHeader extends StatelessWidget {
-  final int selectedIndex;
-  final Function(int) onTabChanged;
-  final FocusNode? firstTabNode; // 新增
-  final bool showPrivate; // 1. 新增：控制是否显示私密栏
-
-  const TopHeader({
-    super.key,
-    required this.selectedIndex,
-    required this.onTabChanged,
-    this.firstTabNode,
-    this.showPrivate = false, // 2. 新增：默认为 false
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 30),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _buildTopTab(0, "动画", node: firstTabNode), // 仅给第一个标签绑定 node
-          _buildTopTab(1, "综艺"),
-          _buildTopTab(2, "电影"),
-          _buildTopTab(3, "电视剧"),
-          if (showPrivate)
-            _buildTopTab(4, "绅士专区"),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTopTab(int index, String title, {FocusNode? node}) {
-    bool isSelected = selectedIndex == index;
-
-    return FocusableWidget(
-      focusNode: node, // 绑定
-      builder: (context, focused) {
-        return Container(
-          margin: const EdgeInsets.symmetric(horizontal: 10),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          decoration: BoxDecoration(
-            color: focused ? Colors.white : (isSelected ? Colors.white24 : Colors.transparent),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Text(
-            title,
+        ),
+        const SizedBox(width: 12),
+        Text(
+          title,
+          style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w700),
+        ),
+        if (caption != null) ...[
+          const SizedBox(width: 12),
+          Text(
+            caption!,
             style: TextStyle(
-              color: focused ? Colors.black : Colors.white,
-              fontWeight: FontWeight.bold,
+              color: Colors.white.withValues(alpha: 0.45),
+              fontSize: 13,
             ),
           ),
-        );
-      },
-      onTap: () => onTabChanged(index),
+        ],
+        const Spacer(),
+        if (trailing != null) trailing!,
+      ],
+    );
+  }
+}
+
+class EmptyState extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String message;
+
+  const EmptyState({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 52, color: Colors.white.withValues(alpha: 0.25)),
+          const SizedBox(height: 18),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.48)),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
     );
   }
 }

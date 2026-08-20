@@ -1,5 +1,9 @@
 allprojects {
     repositories {
+        // Prefer mainland China mirrors for Android and Kotlin dependencies.
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/central") }
+        maven { url = uri("https://mirrors.cloud.tencent.com/repository/maven/") }
         google()
         mavenCentral()
     }

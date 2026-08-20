@@ -1,4 +1,4 @@
-package com.ZYCcompany.zycFun;
+package com.zzzfun.app;
 
 import io.flutter.embedding.android.FlutterActivity;
 
