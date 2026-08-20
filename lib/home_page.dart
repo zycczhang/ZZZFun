@@ -11,6 +11,22 @@ import 'services/anime_storage_service.dart';
 import 'services/app_logger.dart';
 import 'services/bangumi_api_service.dart';
 
+class _CachedSearchPage {
+  final List<AnimeItem> items;
+  final bool hasNext;
+  final bool noResults;
+  final String? error;
+  final int total;
+
+  const _CachedSearchPage({
+    required this.items,
+    required this.hasNext,
+    required this.noResults,
+    required this.error,
+    required this.total,
+  });
+}
+
 class TvHomePage extends StatefulWidget {
   const TvHomePage({super.key});
 
@@ -19,6 +35,10 @@ class TvHomePage extends StatefulWidget {
 }
 
 class _TvHomePageState extends State<TvHomePage> {
+  static const _searchPageSize = 20;
+  static const _maxSearchResults = 100;
+  static const _maxCachedSearchPages = 20;
+
   int _selectedPage = 0;
   int _selectedWeekday = DateTime.now().weekday;
   final BangumiApiService _bangumiApi = BangumiApiService();
@@ -26,11 +46,21 @@ class _TvHomePageState extends State<TvHomePage> {
   List<AnimeItem> _popularItems = const [];
   List<AnimeItem> _favorites = const [];
   List<AnimeItem> _history = const [];
+  List<AnimeItem> _searchItems = const [];
   List<BangumiCalendarDay> _calendarDays = const [];
   bool _popularLoading = true;
   bool _calendarLoading = true;
+  bool _searchLoading = false;
+  bool _searchHasNext = false;
+  bool _searchNoResults = false;
   String? _popularError;
   String? _calendarError;
+  String? _searchError;
+  String _searchQuery = '';
+  int _searchPageOffset = 0;
+  int _searchRequestId = 0;
+  final Map<String, _CachedSearchPage> _searchPageCache =
+      <String, _CachedSearchPage>{};
 
   @override
   void initState() {
@@ -110,6 +140,142 @@ class _TvHomePageState extends State<TvHomePage> {
     });
   }
 
+  Future<void> _searchAnime(String keyword) async {
+    final query = keyword.trim();
+    _searchQuery = query;
+    if (query.isEmpty) {
+      ++_searchRequestId;
+      setState(() {
+        _searchItems = const [];
+        _searchLoading = false;
+        _searchHasNext = false;
+        _searchNoResults = false;
+        _searchError = null;
+      });
+      return;
+    }
+
+    _searchPageOffset = 0;
+    await _loadSearchPage(query, 0);
+  }
+
+  Future<void> _loadSearchPage(String query, int offset) async {
+    final requestId = ++_searchRequestId;
+    final cacheKey = _searchCacheKey(query, offset);
+    final cachedPage = _searchPageCache.remove(cacheKey);
+    if (cachedPage != null) {
+      _searchPageCache[cacheKey] = cachedPage;
+      if (!mounted || requestId != _searchRequestId) return;
+      setState(() {
+        _searchItems = cachedPage.items;
+        _searchLoading = false;
+        _searchPageOffset = offset;
+        _searchHasNext = cachedPage.hasNext;
+        _searchNoResults = cachedPage.noResults;
+        _searchError = cachedPage.error;
+      });
+      AppLogger.info('bangumi', '搜索缓存命中: "$query"，offset=$offset');
+      return;
+    }
+
+    setState(() {
+      _searchItems = const [];
+      _searchLoading = true;
+      _searchPageOffset = offset;
+      _searchHasNext = false;
+      _searchNoResults = false;
+      _searchError = null;
+    });
+    try {
+      final page = await _bangumiApi.searchSubjects(
+        query,
+        limit: _searchPageSize,
+        offset: offset,
+        sort: 'heat',
+      );
+      if (!mounted || requestId != _searchRequestId) return;
+      final items = page.subjects
+          .where((subject) => _matchesSearchKeyword(subject, query))
+          .map(AnimeItem.fromBangumi)
+          .toList(growable: false);
+      final hasNext =
+          page.subjects.length >= _searchPageSize &&
+          offset + _searchPageSize < page.total &&
+          offset + _searchPageSize < _maxSearchResults;
+      final noResults = items.isEmpty;
+      final errorMessage = noResults
+          ? offset == 0
+                ? '没有找到相关番剧。'
+                : '当前页没有匹配结果，请继续翻页。'
+          : null;
+      _cacheSearchPage(
+        cacheKey,
+        _CachedSearchPage(
+          items: items,
+          hasNext: hasNext,
+          noResults: noResults,
+          error: errorMessage,
+          total: page.total,
+        ),
+      );
+      setState(() {
+        _searchItems = items;
+        _searchLoading = false;
+        _searchHasNext = hasNext;
+        _searchNoResults = noResults;
+        _searchError = errorMessage;
+      });
+      AppLogger.info(
+        'bangumi',
+        '搜索完成: "$query"，第 ${offset ~/ _searchPageSize + 1} 页，'
+            '${items.length} 部（接口总数 ${page.total}）',
+      );
+    } catch (error, stackTrace) {
+      AppLogger.warning('bangumi', '搜索番剧失败: "$query"', error, stackTrace);
+      if (!mounted || requestId != _searchRequestId) return;
+      setState(() {
+        _searchItems = const [];
+        _searchLoading = false;
+        _searchHasNext = false;
+        _searchNoResults = false;
+        _searchError = '搜索失败，请检查网络连接和设置页日志。';
+      });
+    }
+  }
+
+  String _searchCacheKey(String query, int offset) {
+    return '${_normalizeSearchText(query)}\u0000$offset';
+  }
+
+  void _cacheSearchPage(String key, _CachedSearchPage page) {
+    _searchPageCache.remove(key);
+    _searchPageCache[key] = page;
+    while (_searchPageCache.length > _maxCachedSearchPages) {
+      _searchPageCache.remove(_searchPageCache.keys.first);
+    }
+  }
+
+  Future<void> _changeSearchPage(int delta) async {
+    if (_searchLoading || _searchQuery.isEmpty) return;
+    final nextOffset = _searchPageOffset + delta * _searchPageSize;
+    if (nextOffset < 0 || nextOffset >= _maxSearchResults) return;
+    if (delta > 0 && !_searchHasNext) return;
+    await _loadSearchPage(_searchQuery, nextOffset);
+  }
+
+  bool _matchesSearchKeyword(BangumiSubject subject, String query) {
+    final normalizedQuery = _normalizeSearchText(query);
+    if (normalizedQuery.isEmpty) return false;
+    final candidates = [subject.name, subject.nameCn, ...subject.aliases];
+    return candidates.any(
+      (candidate) => _normalizeSearchText(candidate).contains(normalizedQuery),
+    );
+  }
+
+  String _normalizeSearchText(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'\s+'), '');
+  }
+
   void _selectWeekday(int weekday) {
     if (_selectedWeekday == weekday) return;
     setState(() => _selectedWeekday = weekday);
@@ -184,6 +350,7 @@ class _TvHomePageState extends State<TvHomePage> {
               ),
             ),
             const SizedBox(height: 42),
+            _buildRailButton(4, Icons.search_rounded, '搜索'),
             _buildRailButton(0, Icons.home_rounded, '首页'),
             _buildRailButton(1, Icons.calendar_month_outlined, '日期表'),
             _buildRailButton(2, Icons.bookmark_border_rounded, '片单'),
@@ -287,6 +454,21 @@ class _TvHomePageState extends State<TvHomePage> {
         );
       case 3:
         return const SettingsPage(key: ValueKey('settings'));
+      case 4:
+        return SearchPage(
+          key: const ValueKey('search'),
+          items: _searchItems,
+          loading: _searchLoading,
+          error: _searchError,
+          noResults: _searchNoResults,
+          initialQuery: _searchQuery,
+          pageNumber: _searchPageOffset ~/ _searchPageSize + 1,
+          hasPrevious: _searchPageOffset > 0,
+          hasNext: _searchHasNext,
+          onSearch: _searchAnime,
+          onPageChanged: (delta) => unawaited(_changeSearchPage(delta)),
+          onOpen: (item) => unawaited(_openItem(item)),
+        );
       default:
         return HomeDashboard(
           key: const ValueKey('dashboard'),
@@ -743,6 +925,329 @@ class _HomeDashboardState extends State<HomeDashboard> {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class SearchPage extends StatefulWidget {
+  final List<AnimeItem> items;
+  final bool loading;
+  final String? error;
+  final bool noResults;
+  final String initialQuery;
+  final int pageNumber;
+  final bool hasPrevious;
+  final bool hasNext;
+  final Future<void> Function(String query) onSearch;
+  final ValueChanged<int> onPageChanged;
+  final ValueChanged<AnimeItem> onOpen;
+
+  const SearchPage({
+    super.key,
+    required this.items,
+    required this.loading,
+    required this.error,
+    required this.noResults,
+    required this.initialQuery,
+    required this.pageNumber,
+    required this.hasPrevious,
+    required this.hasNext,
+    required this.onSearch,
+    required this.onPageChanged,
+    required this.onOpen,
+  });
+
+  @override
+  State<SearchPage> createState() => _SearchPageState();
+}
+
+class _SearchPageState extends State<SearchPage> {
+  late final TextEditingController _queryController;
+  late final FocusNode _queryFocusNode;
+  late final FocusNode _firstResultFocusNode;
+  late final FocusNode _previousPageFocusNode;
+  late final FocusNode _nextPageFocusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _queryController = TextEditingController(text: widget.initialQuery);
+    _queryFocusNode = FocusNode(debugLabel: 'ZZZFunSearchInput');
+    _queryFocusNode.onKeyEvent = _handleQueryKeyEvent;
+    _firstResultFocusNode = FocusNode(debugLabel: 'ZZZFunSearchFirstResult');
+    _previousPageFocusNode = FocusNode(debugLabel: 'ZZZFunSearchPreviousPage');
+    _nextPageFocusNode = FocusNode(debugLabel: 'ZZZFunSearchNextPage');
+  }
+
+  @override
+  void didUpdateWidget(covariant SearchPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialQuery != widget.initialQuery &&
+        _queryController.text != widget.initialQuery) {
+      _queryController.value = TextEditingValue(
+        text: widget.initialQuery,
+        selection: TextSelection.collapsed(offset: widget.initialQuery.length),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _queryController.dispose();
+    _queryFocusNode.dispose();
+    _firstResultFocusNode.dispose();
+    _previousPageFocusNode.dispose();
+    _nextPageFocusNode.dispose();
+    super.dispose();
+  }
+
+  KeyEventResult _handleQueryKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      if (widget.items.isNotEmpty) {
+        _firstResultFocusNode.requestFocus();
+        return KeyEventResult.handled;
+      }
+      if (widget.hasNext) {
+        _nextPageFocusNode.requestFocus();
+        return KeyEventResult.handled;
+      }
+      if (widget.hasPrevious) {
+        _previousPageFocusNode.requestFocus();
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleResultKeyEvent(
+    int index,
+    int columns,
+    FocusNode node,
+    KeyEvent event,
+  ) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp && index < columns) {
+      _queryFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown &&
+        index >= widget.items.length - columns) {
+      final target = widget.hasNext
+          ? _nextPageFocusNode
+          : widget.hasPrevious
+          ? _previousPageFocusNode
+          : null;
+      if (target != null) {
+        target.requestFocus();
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
+  int _gridColumnCount(double width) {
+    return ((width + 16) / (190 + 16)).floor().clamp(1, 20).toInt();
+  }
+
+  void _submit() {
+    unawaited(widget.onSearch(_queryController.text));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppPage(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(28, 24, 38, 28),
+        child: Column(
+          children: [
+            Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 760),
+                child: TextField(
+                  controller: _queryController,
+                  focusNode: _queryFocusNode,
+                  autofocus: true,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (_) => _submit(),
+                  style: const TextStyle(fontSize: 17),
+                  decoration: InputDecoration(
+                    hintText: '搜索动漫',
+                    prefixIcon: const Icon(Icons.search_rounded),
+                    suffixIcon: widget.loading
+                        ? const Padding(
+                            padding: EdgeInsets.all(14),
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: const Color(0xFF28262D),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 18,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide(
+                        color: Colors.white.withOpacity(0.08),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).colorScheme.primary,
+                        width: 2,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 28),
+            Expanded(child: _buildResults()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResults() {
+    if (widget.loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (widget.error != null) {
+      return Column(
+        children: [
+          Expanded(
+            child: EmptyState(
+              icon: widget.noResults
+                  ? Icons.search_off_rounded
+                  : Icons.cloud_off_outlined,
+              title: widget.noResults ? '没有找到相关番剧' : '搜索失败',
+              message: widget.error!,
+            ),
+          ),
+          if (widget.noResults && (widget.hasPrevious || widget.hasNext))
+            _buildPageControls(),
+        ],
+      );
+    }
+    if (widget.items.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeading(title: '搜索结果'),
+        const SizedBox(height: 18),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = _gridColumnCount(constraints.maxWidth);
+              return GridView.builder(
+                padding: const EdgeInsets.fromLTRB(6, 8, 6, 20),
+                itemCount: widget.items.length,
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 190,
+                  childAspectRatio: 0.55,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 24,
+                ),
+                itemBuilder: (context, index) {
+                  final item = widget.items[index];
+                  return PreviewCard(
+                    item: item,
+                    focusNode: index == 0 ? _firstResultFocusNode : null,
+                    onKeyEvent: (node, event) =>
+                        _handleResultKeyEvent(index, columns, node, event),
+                    onTap: () => widget.onOpen(item),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        _buildPageControls(),
+      ],
+    );
+  }
+
+  Widget _buildPageControls() {
+    if (!widget.hasPrevious && !widget.hasNext) {
+      return const SizedBox.shrink();
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildPageButton(
+          tooltip: '上一页',
+          icon: Icons.chevron_left_rounded,
+          focusNode: _previousPageFocusNode,
+          enabled: widget.hasPrevious && !widget.loading,
+          onTap: () => widget.onPageChanged(-1),
+        ),
+        Text(
+          '第 ${widget.pageNumber} 页',
+          style: const TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+        _buildPageButton(
+          tooltip: '下一页',
+          icon: Icons.chevron_right_rounded,
+          focusNode: _nextPageFocusNode,
+          enabled: widget.hasNext && !widget.loading,
+          onTap: () => widget.onPageChanged(1),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPageButton({
+    required String tooltip,
+    required IconData icon,
+    required FocusNode focusNode,
+    required bool enabled,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: FocusableWidget(
+        focusNode: focusNode,
+        enabled: enabled,
+        onTap: onTap,
+        builder: (context, focused) {
+          final primary = Theme.of(context).colorScheme.primary;
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: focused
+                  ? primary
+                  : Colors.white.withValues(alpha: enabled ? 0.08 : 0.03),
+              shape: BoxShape.circle,
+              border: focused
+                  ? Border.all(color: primary.withValues(alpha: 0.55), width: 2)
+                  : null,
+            ),
+            child: Icon(
+              icon,
+              size: 20,
+              color: focused
+                  ? Colors.black
+                  : enabled
+                  ? Colors.white70
+                  : Colors.white24,
+            ),
+          );
+        },
       ),
     );
   }
@@ -1487,6 +1992,8 @@ class PreviewCard extends StatelessWidget {
   final AnimeItem item;
   final bool isFavorite;
   final double? width;
+  final FocusNode? focusNode;
+  final KeyEventResult Function(FocusNode node, KeyEvent event)? onKeyEvent;
   final VoidCallback onTap;
   final VoidCallback? onFavorite;
 
@@ -1495,6 +2002,8 @@ class PreviewCard extends StatelessWidget {
     required this.item,
     this.isFavorite = false,
     this.width,
+    this.focusNode,
+    this.onKeyEvent,
     required this.onTap,
     this.onFavorite,
   });
@@ -1502,6 +2011,8 @@ class PreviewCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final card = FocusableWidget(
+      focusNode: focusNode,
+      onKeyEvent: onKeyEvent,
       onTap: onTap,
       builder: (context, focused) {
         return AnimatedScale(
