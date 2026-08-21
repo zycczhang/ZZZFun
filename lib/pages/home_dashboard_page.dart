@@ -83,19 +83,14 @@ class _HomeDashboardState extends State<HomeDashboard> {
                     ? Icons.sync_rounded
                     : Icons.cloud_off_outlined,
               ),
-            const SizedBox(height: 28),
+            const SizedBox(height: 10),
             SectionHeading(
               title: '热门番剧',
               caption: widget.popularItems.isEmpty
                   ? '暂无数据'
                   : '${widget.popularItems.length} 部',
-              trailing: TextButton.icon(
-                onPressed: widget.onOpenSchedule,
-                icon: const Icon(Icons.calendar_month_outlined, size: 17),
-                label: const Text('查看日期表'),
-              ),
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 10),
             if (widget.popularItems.isEmpty)
               const SizedBox(
                 height: 180,

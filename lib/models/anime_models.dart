@@ -15,6 +15,7 @@ class AnimeItem {
   final int? episodeCount;
   final String? airDate;
   final List<String> tags;
+  final List<String> aliases;
 
   const AnimeItem({
     required this.id,
@@ -31,6 +32,7 @@ class AnimeItem {
     this.episodeCount,
     this.airDate,
     this.tags = const [],
+    this.aliases = const [],
   });
 
   factory AnimeItem.fromBangumi(BangumiSubject subject) {
@@ -62,6 +64,7 @@ class AnimeItem {
       episodeCount: subject.episodeCount,
       airDate: subject.airDate,
       tags: tags,
+      aliases: subject.aliases,
     );
   }
 
@@ -80,6 +83,7 @@ class AnimeItem {
     'episodeCount': episodeCount,
     'airDate': airDate,
     'tags': tags,
+    'aliases': aliases,
   };
 
   factory AnimeItem.fromJson(Map<String, dynamic> json) {
@@ -101,6 +105,12 @@ class AnimeItem {
           ? (json['tags'] as List)
                 .map((tag) => tag.toString())
                 .where((tag) => tag.isNotEmpty)
+                .toList(growable: false)
+          : const [],
+      aliases: (json['aliases'] is List)
+          ? (json['aliases'] as List)
+                .map((alias) => alias.toString().trim())
+                .where((alias) => alias.isNotEmpty)
                 .toList(growable: false)
           : const [],
     );

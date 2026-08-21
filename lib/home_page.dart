@@ -13,7 +13,8 @@ import 'pages/settings_page.dart';
 import 'services/anime_storage_service.dart';
 import 'services/app_logger.dart';
 import 'services/bangumi_api_service.dart';
-import 'widgets/anime_detail_dialog.dart';
+import 'services/video_resource_service.dart';
+import 'pages/anime_detail_page.dart';
 
 class _CachedSearchPage {
   final List<AnimeItem> items;
@@ -46,6 +47,7 @@ class _TvHomePageState extends State<TvHomePage> {
   int _selectedPage = 0;
   int _selectedWeekday = DateTime.now().weekday;
   final BangumiApiService _bangumiApi = BangumiApiService();
+  final VideoResourceService _videoResources = VideoResourceService();
 
   List<AnimeItem> _popularItems = const [];
   List<AnimeItem> _favorites = const [];
@@ -63,6 +65,9 @@ class _TvHomePageState extends State<TvHomePage> {
   String _searchQuery = '';
   int _searchPageOffset = 0;
   int _searchRequestId = 0;
+  AnimeItem? _detailItem;
+  bool _detailLoading = false;
+  final Map<int, AnimeItem> _subjectDetailCache = <int, AnimeItem>{};
   final Map<String, _CachedSearchPage> _searchPageCache =
       <String, _CachedSearchPage>{};
 
@@ -77,6 +82,7 @@ class _TvHomePageState extends State<TvHomePage> {
   @override
   void dispose() {
     _bangumiApi.close();
+    _videoResources.close();
     super.dispose();
   }
 
@@ -291,25 +297,68 @@ class _TvHomePageState extends State<TvHomePage> {
   }
 
   Future<void> _openItem(AnimeItem item) async {
+    if (!mounted) return;
+    final cachedItem = item.bangumiId == null
+        ? null
+        : _subjectDetailCache[item.bangumiId!];
+    setState(() {
+      _detailItem = cachedItem ?? item;
+      _detailLoading = item.bangumiId != null && cachedItem == null;
+    });
     await AnimeStorageService.addHistory(item);
     await _loadLibrary();
-    if (!mounted) return;
     AppLogger.info('ui', '打开内容详情: ${item.title}');
-    showDialog<void>(
-      context: context,
-      builder: (context) => PreviewDialog(
-        item: item,
-        isFavorite: _favorites.any((saved) => saved.id == item.id),
-        onFavorite: () {
-          Navigator.of(context).pop();
-          unawaited(_toggleFavorite(item));
-        },
-      ),
-    );
+    final subjectId = item.bangumiId;
+    if (subjectId == null || _subjectDetailCache.containsKey(subjectId)) {
+      if (mounted && _detailItem?.id == item.id) {
+        setState(() => _detailLoading = false);
+      }
+      return;
+    }
+    try {
+      final subject = await _bangumiApi.getSubject(subjectId);
+      final detailedItem = AnimeItem.fromBangumi(subject);
+      _subjectDetailCache[subjectId] = detailedItem;
+      if (!mounted || _detailItem?.id != item.id) return;
+      setState(() {
+        _detailItem = detailedItem;
+        _detailLoading = false;
+      });
+      AppLogger.info('bangumi', '番剧详情已加载: ${detailedItem.title}');
+    } catch (error, stackTrace) {
+      AppLogger.warning(
+        'bangumi',
+        '番剧详情补全失败: ${item.title}',
+        error,
+        stackTrace,
+      );
+      if (mounted && _detailItem?.id == item.id) {
+        setState(() => _detailLoading = false);
+      }
+    }
+  }
+
+  void _closeDetail() {
+    if (_detailItem == null) return;
+    setState(() {
+      _detailItem = null;
+      _detailLoading = false;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final detailItem = _detailItem;
+    if (detailItem != null) {
+      return AnimeDetailPage(
+        item: detailItem,
+        isFavorite: _favorites.any((saved) => saved.id == detailItem.id),
+        loadingDetails: _detailLoading,
+        onBack: _closeDetail,
+        onToggleFavorite: () => unawaited(_toggleFavorite(detailItem)),
+        resourceService: _videoResources,
+      );
+    }
     return Scaffold(
       body: Row(
         children: [
@@ -377,6 +426,15 @@ class _TvHomePageState extends State<TvHomePage> {
           autofocus: index == 0,
           onTap: () {
             AppLogger.debug('ui', '切换页面: $label');
+            if (index == 3) {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) =>
+                      SettingsPage(resourceService: _videoResources),
+                ),
+              );
+              return;
+            }
             setState(() => _selectedPage = index);
           },
           builder: (context, focused) {
@@ -456,8 +514,6 @@ class _TvHomePageState extends State<TvHomePage> {
           onToggleFavorite: _toggleFavorite,
           onOpen: (item) => unawaited(_openItem(item)),
         );
-      case 3:
-        return const SettingsPage(key: ValueKey('settings'));
       case 4:
         return SearchPage(
           key: const ValueKey('search'),
