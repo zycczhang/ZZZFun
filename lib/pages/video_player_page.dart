@@ -404,7 +404,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         return KeyEventResult.handled;
       }
       if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        _focusFirstEpisode(sourceIndex: sourceIndex);
+        _focusFirstEpisode();
         return KeyEventResult.handled;
       }
       if (event.logicalKey == LogicalKeyboardKey.arrowLeft && sourceIndex > 0) {
