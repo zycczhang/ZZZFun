@@ -55,7 +55,7 @@ class SchedulePage extends StatelessWidget {
                 message: '放送日历获取失败，当前没有可展示的更新数据。请检查网络或前往设置查看日志。',
               ),
             ],
-            const SizedBox(height: 28),
+            const SizedBox(height: 16),
             SectionHeading(
               title: selectedDay?.weekdayCn ?? weekdayLabel(selectedWeekday),
               caption: items.isEmpty ? '暂无数据' : '${items.length} 部更新',
@@ -124,49 +124,67 @@ class _WeekdaySelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 72,
+      height: 56,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: 7,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (context, index) {
           final weekday = index + 1;
           final day = _dayFor(weekday);
           final selected = weekday == selectedWeekday;
           return SizedBox(
-            width: 82,
-            child: Material(
-              color: selected
-                  ? Theme.of(context).colorScheme.primary
-                  : const Color(0xFF171A20),
-              borderRadius: BorderRadius.circular(9),
-              child: InkWell(
-                onTap: () => onChanged(weekday),
-                borderRadius: BorderRadius.circular(9),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        weekdayLabel(weekday),
-                        style: TextStyle(
-                          color: selected ? Colors.black : Colors.white70,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        day == null ? '暂无数据' : '${day.subjects.length} 部',
-                        style: TextStyle(
-                          color: selected ? Colors.black54 : Colors.white38,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
+            width: 68,
+            child: FocusableWidget(
+              onTap: () => onChanged(weekday),
+              builder: (context, focused) {
+                final primary = Theme.of(context).colorScheme.primary;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  decoration: BoxDecoration(
+                    color: focused
+                        ? primary
+                        : selected
+                        ? primary.withOpacity(0.16)
+                        : const Color(0xFF171A20),
+                    borderRadius: BorderRadius.circular(9),
+                    border: selected && !focused
+                        ? Border.all(color: primary.withOpacity(0.5))
+                        : null,
                   ),
-                ),
-              ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 5),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          weekdayLabel(weekday),
+                          style: TextStyle(
+                            color: focused
+                                ? Colors.black
+                                : selected
+                                ? Colors.white
+                                : Colors.white70,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          day == null ? '暂无数据' : '${day.subjects.length} 部',
+                          style: TextStyle(
+                            color: focused
+                                ? Colors.black54
+                                : selected
+                                ? Colors.white54
+                                : Colors.white38,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
           );
         },
