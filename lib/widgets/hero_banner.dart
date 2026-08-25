@@ -39,10 +39,14 @@ class HeroBanner extends StatelessWidget {
           onKeyEvent: (node, event) {
             if (event is! KeyDownEvent) return KeyEventResult.ignored;
             if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+              if (selectedIndex == 0) return KeyEventResult.ignored;
               onPrevious();
               return KeyEventResult.handled;
             }
             if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+              if (selectedIndex == items.length - 1) {
+                return KeyEventResult.handled;
+              }
               onNext();
               return KeyEventResult.handled;
             }

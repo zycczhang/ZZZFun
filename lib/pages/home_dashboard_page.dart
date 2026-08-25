@@ -27,28 +27,31 @@ class HomeDashboard extends StatefulWidget {
 }
 
 class _HomeDashboardState extends State<HomeDashboard> {
+  static const _featuredLimit = 4;
   int _featuredIndex = 0;
 
   @override
   void didUpdateWidget(covariant HomeDashboard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.popularItems.isEmpty ||
-        _featuredIndex >= widget.popularItems.take(8).length) {
+        _featuredIndex >= widget.popularItems.take(_featuredLimit).length) {
       _featuredIndex = 0;
     }
   }
 
   void _moveFeatured(int delta) {
-    final featuredCount = widget.popularItems.take(8).length;
+    final featuredCount = widget.popularItems.take(_featuredLimit).length;
     if (featuredCount < 2) return;
-    setState(() {
-      _featuredIndex = (_featuredIndex + delta + featuredCount) % featuredCount;
-    });
+    final nextIndex =
+        (_featuredIndex + delta).clamp(0, featuredCount - 1).toInt();
+    if (nextIndex == _featuredIndex) return;
+    setState(() => _featuredIndex = nextIndex);
   }
 
   @override
   Widget build(BuildContext context) {
-    final carouselItems = widget.popularItems.take(8).toList(growable: false);
+    final carouselItems =
+        widget.popularItems.take(_featuredLimit).toList(growable: false);
     final carouselIndex = carouselItems.isEmpty
         ? 0
         : _featuredIndex.clamp(0, carouselItems.length - 1).toInt();
