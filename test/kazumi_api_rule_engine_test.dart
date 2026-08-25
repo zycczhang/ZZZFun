@@ -200,6 +200,10 @@ void main() {
       result.sources.first.episodes.first.requestHeaders['Referer'],
       'https://example.com/',
     );
+    expect(
+      result.sources.first.episodes.first.mediaHeaders['Referer'],
+      'https://example.com/',
+    );
     await engine.close();
   });
 

@@ -45,6 +45,7 @@ class VideoEpisode {
   final int roadIndex;
   final int episodeIndex;
   final Map<String, String> requestHeaders;
+  final Map<String, String> mediaHeaders;
   final bool useLegacyParser;
 
   const VideoEpisode({
@@ -53,6 +54,7 @@ class VideoEpisode {
     required this.roadIndex,
     required this.episodeIndex,
     this.requestHeaders = const {},
+    this.mediaHeaders = const {},
     this.useLegacyParser = false,
   });
 }

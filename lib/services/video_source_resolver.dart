@@ -32,7 +32,7 @@ class ResolvedVideoSource {
 /// player. A fresh headless WebView is used for each request so cookies and
 /// JavaScript state cannot leak between unrelated sites.
 class VideoSourceResolver {
-  VideoSourceResolver({this.defaultTimeout = const Duration(seconds: 25)});
+  VideoSourceResolver({this.defaultTimeout = const Duration(seconds: 15)});
 
   final Duration defaultTimeout;
 
@@ -48,7 +48,7 @@ class VideoSourceResolver {
     if (_isMediaUrl(directUri.toString())) {
       return ResolvedVideoSource(
         uri: directUri,
-        headers: episode.requestHeaders,
+        headers: _mediaHeaders(episode),
         isHls: _isHlsUrl(directUri.toString()),
       );
     }
@@ -74,7 +74,7 @@ class VideoSourceResolver {
       completer.complete(
         ResolvedVideoSource(
           uri: normalized,
-          headers: episode.requestHeaders,
+          headers: _mediaHeaders(episode),
           isHls: isResponseManifest || _isHlsUrl(normalized.toString()),
         ),
       );
@@ -82,7 +82,7 @@ class VideoSourceResolver {
 
     final settings = InAppWebViewSettings(
       javaScriptEnabled: true,
-      cacheEnabled: true,
+      cacheEnabled: false,
       clearCache: false,
       loadsImagesAutomatically: false,
       mediaPlaybackRequiresUserGesture: false,
@@ -92,6 +92,11 @@ class VideoSourceResolver {
 
     final webView = HeadlessInAppWebView(
       initialSettings: settings,
+      shouldInterceptRequest: (controller, request) async {
+        final requestUrl = request.url.toString();
+        if (_isMediaUrl(requestUrl)) completeWithUrl(requestUrl);
+        return null;
+      },
       onWebViewCreated: (controller) async {
         controller.addJavaScriptHandler(
           handlerName: 'ZZZFunVideoBridge',
@@ -120,12 +125,6 @@ class VideoSourceResolver {
           ),
         );
       },
-      onLoadResource: (controller, resource) {
-        completeWithUrl(resource.url.toString());
-      },
-      onReceivedError: (controller, request, error) {
-        completeWithUrl(request.url.toString());
-      },
     );
 
     try {
@@ -151,6 +150,11 @@ class VideoSourceResolver {
   }
 
   static bool _isHlsUrl(String url) => url.toLowerCase().contains('.m3u8');
+
+  Map<String, String> _mediaHeaders(VideoEpisode episode) {
+    if (episode.mediaHeaders.isNotEmpty) return episode.mediaHeaders;
+    return episode.requestHeaders;
+  }
 
   Uri? _normalizeMediaUrl(
     String rawUrl,

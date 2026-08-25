@@ -42,7 +42,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   final FocusNode _previousFocusNode = FocusNode(debugLabel: '上一集');
   final FocusNode _rewindFocusNode = FocusNode(debugLabel: '快退');
   final FocusNode _playPauseFocusNode = FocusNode(debugLabel: '播放暂停');
-  final FocusNode _progressFocusNode = FocusNode(debugLabel: '播放进度');
   final FocusNode _forwardFocusNode = FocusNode(debugLabel: '快进');
   final FocusNode _nextFocusNode = FocusNode(debugLabel: '下一集');
   final FocusNode _changeSourceFocusNode = FocusNode(debugLabel: '更换播放源');
@@ -74,7 +73,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     _previousFocusNode.dispose();
     _rewindFocusNode.dispose();
     _playPauseFocusNode.dispose();
-    _progressFocusNode.dispose();
     _forwardFocusNode.dispose();
     _nextFocusNode.dispose();
     _changeSourceFocusNode.dispose();
@@ -136,13 +134,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       _startControlHideTimer();
     }
 
+    VideoPlayerController? controller;
     try {
       final resolved = await _resolver.resolve(
         episode,
         useLegacyParser: _selection.rule.useLegacyParser,
       );
       if (!mounted || generation != _loadGeneration) return;
-      final controller = VideoPlayerController.networkUrl(
+      controller = VideoPlayerController.networkUrl(
         resolved.uri,
         formatHint: resolved.isHls ? VideoFormat.hls : null,
         httpHeaders: resolved.headers,
@@ -160,11 +159,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       });
       await controller.play();
       if (_fullscreen) {
-        _showControlsAndFocus(_progressFocusNode);
+        _showControlsAndFocus();
       } else {
         _requestPlayerFocus();
       }
     } catch (error) {
+      await controller?.dispose();
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _loading = false;
@@ -178,7 +178,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     if (!mounted) return;
     final controller = _controller;
     if (controller?.value.hasError == true && _error == null) {
-      setState(() => _error = controller!.value.errorDescription);
+      final error = controller!.value.errorDescription ?? '播放器发生未知错误';
+      setState(() {
+        _loading = false;
+        _error = error;
+      });
     }
   }
 
@@ -222,28 +226,45 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     if (sources.isEmpty) return;
     final sourceIndex = _safeSourceIndex;
     final episodes = sources[sourceIndex].episodes;
-    final currentIndex = episodes.indexWhere(
-      (episode) =>
-          episode.pageUrl == _selection.episode.pageUrl &&
-          episode.name == _selection.episode.name,
-    );
-    if (currentIndex < 0) return;
-    final nextIndex = currentIndex + delta;
-    if (nextIndex < 0 || nextIndex >= episodes.length) return;
+    final nextIndex = _adjacentEpisodeIndex(episodes, delta);
+    if (nextIndex == null) return;
     _selectEpisode(episodes[nextIndex], sourceIndex);
   }
 
   bool _hasAdjacentEpisode(int delta) {
     final sources = _selection.chapters.sources;
     if (sources.isEmpty) return false;
-    final episodes = sources[_safeSourceIndex].episodes;
+    return _adjacentEpisodeIndex(sources[_safeSourceIndex].episodes, delta) !=
+        null;
+  }
+
+  int? _adjacentEpisodeIndex(List<VideoEpisode> episodes, int delta) {
     final currentIndex = episodes.indexWhere(
       (episode) =>
           episode.pageUrl == _selection.episode.pageUrl &&
           episode.name == _selection.episode.name,
     );
-    final nextIndex = currentIndex + delta;
-    return currentIndex >= 0 && nextIndex >= 0 && nextIndex < episodes.length;
+    if (currentIndex < 0) return null;
+
+    final currentNumber = _episodeNumber(episodes[currentIndex].name);
+    if (currentNumber != null) {
+      final targetNumber = currentNumber + delta;
+      if (targetNumber <= 0) return null;
+      final targetIndex = episodes.indexWhere(
+        (episode) => _episodeNumber(episode.name) == targetNumber,
+      );
+      return targetIndex < 0 ? null : targetIndex;
+    }
+
+    final targetIndex = currentIndex + delta;
+    return targetIndex < 0 || targetIndex >= episodes.length
+        ? null
+        : targetIndex;
+  }
+
+  int? _episodeNumber(String name) {
+    final match = RegExp(r'(?<!\d)(\d+)(?!\d)').firstMatch(name);
+    return match == null ? null : int.tryParse(match.group(1)!);
   }
 
   void _togglePlayPause() {
@@ -264,7 +285,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       _fullscreen = true;
       _showFullscreenControls = true;
     });
-    _showControlsAndFocus(_progressFocusNode);
+    _markFullscreenInteraction();
+    _requestPlayerFocus();
   }
 
   void _exitFullscreen() {
@@ -295,11 +317,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     _startControlHideTimer();
   }
 
-  void _showControlsAndFocus(FocusNode focusNode) {
+  void _showControlsAndFocus() {
     _markFullscreenInteraction();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _fullscreen && _showFullscreenControls) {
-        focusNode.requestFocus();
+        _focusFirstPlaybackControl();
       }
     });
   }
@@ -319,11 +341,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     }
     if (!_fullscreen) {
       _enterFullscreen();
-    } else if (!_showFullscreenControls) {
-      _showControlsAndFocus(_progressFocusNode);
     } else {
       _togglePlayPause();
-      _markFullscreenInteraction();
+      if (!_showFullscreenControls) {
+        _showControlsAndFocus();
+      } else {
+        _markFullscreenInteraction();
+      }
     }
   }
 
@@ -344,7 +368,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       }
       if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
         if (_fullscreen) {
-          _showControlsAndFocus(_progressFocusNode);
+          _showControlsAndFocus();
         } else {
           _changeSourceFocusNode.requestFocus();
         }
@@ -361,29 +385,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   KeyEventResult _handleControlKey(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent) {
       _markFullscreenInteraction();
-      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        _progressFocusNode.requestFocus();
-        return KeyEventResult.handled;
-      }
-    }
-    return KeyEventResult.ignored;
-  }
-
-  KeyEventResult _handleProgressKey(FocusNode node, KeyEvent event) {
-    if (_isKeyPress(event)) {
-      _markFullscreenInteraction();
-      if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-        _handleKeySeek(false);
-        return KeyEventResult.handled;
-      }
-      if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-        _handleKeySeek(true);
-        return KeyEventResult.handled;
-      }
-      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        _focusFirstPlaybackControl();
-        return KeyEventResult.handled;
-      }
       if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
         _playerFocusNode.requestFocus();
         return KeyEventResult.handled;
@@ -618,48 +619,74 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   Widget _buildMainColumn() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(28, 24, 28, 44),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1500),
-                child: AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: _buildPlayerSurface(fullscreen: false),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 42,
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    widget.item.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w800,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final contentWidth = !constraints.maxWidth.isFinite
+              ? 1500.0
+              : constraints.maxWidth > 1500
+              ? 1500.0
+              : constraints.maxWidth;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Align(
+                  alignment: Alignment.center,
+                  child: SizedBox(
+                    width: contentWidth,
+                    child: AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: _buildPlayerSurface(fullscreen: false),
                     ),
                   ),
                 ),
-                const SizedBox(width: 14),
-                _buildTextControl(
-                  focusNode: _changeSourceFocusNode,
-                  icon: Icons.alt_route_rounded,
-                  label: '换源',
-                  onTap: _openSourcePicker,
-                  onKeyEvent: _handleNormalChangeSourceKey,
+              ),
+              const SizedBox(height: 14),
+              Align(
+                alignment: Alignment.center,
+                child: SizedBox(
+                  width: contentWidth,
+                  height: 42,
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          widget.item.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Flexible(
+                        child: Text(
+                          '当前播放源：${_selection.rule.name}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.62),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      _buildTextControl(
+                        focusNode: _changeSourceFocusNode,
+                        icon: Icons.alt_route_rounded,
+                        label: '换源',
+                        onTap: _openSourcePicker,
+                        onKeyEvent: _handleNormalChangeSourceKey,
+                      ),
+                    ],
+                  ),
                 ),
-              ],
-            ),
-          ),
-        ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -735,6 +762,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   }
 
   Widget _buildPlayerError() {
+    final error = _error!;
     return Container(
       color: Colors.black54,
       alignment: Alignment.center,
@@ -747,12 +775,21 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
           const Text('播放失败', style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 6),
           Text(
-            _error.toString(),
+            error.toString(),
             textAlign: TextAlign.center,
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.6),
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _playbackErrorHint(error),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.9),
               fontSize: 12,
             ),
           ),
@@ -765,6 +802,16 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         ],
       ),
     );
+  }
+
+  String _playbackErrorHint(Object error) {
+    if (error is VideoSourceResolveException && error.message == '播放页解析超时') {
+      return '播放页解析超时，可能是源站点问题，尝试更换线路或者播放源。';
+    }
+    if (error.toString().contains('ExoPlaybackException: Source error')) {
+      return '当前集数的视频地址可能已失效，尝试更换集数、线路或者播放源。';
+    }
+    return '请重试，或尝试更换线路或者播放源。';
   }
 
   Widget _buildPlaybackControls(
@@ -798,32 +845,26 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            FocusableWidget(
-              focusNode: _progressFocusNode,
-              onKeyEvent: _handleProgressKey,
-              builder: (context, focused) => SizedBox(
-                height: 32,
-                child: SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: focused ? 5 : 3,
-                    thumbShape: RoundSliderThumbShape(
-                      enabledThumbRadius: focused ? 7 : 5,
-                    ),
-                    activeTrackColor: focused
-                        ? Theme.of(context).colorScheme.primary
-                        : Colors.white,
-                    inactiveTrackColor: Colors.white30,
-                    thumbColor: Theme.of(context).colorScheme.primary,
-                    overlayColor: Theme.of(
-                      context,
-                    ).colorScheme.primary.withValues(alpha: 0.18),
+            SizedBox(
+              height: 32,
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 3,
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 5,
                   ),
-                  child: ExcludeFocus(
-                    child: Slider(
-                      value: displayPosition.toDouble(),
-                      max: max,
-                      onChanged: _seekFromSlider,
-                    ),
+                  activeTrackColor: Colors.white,
+                  inactiveTrackColor: Colors.white30,
+                  thumbColor: Theme.of(context).colorScheme.primary,
+                  overlayColor: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.18),
+                ),
+                child: ExcludeFocus(
+                  child: Slider(
+                    value: displayPosition.toDouble(),
+                    max: max,
+                    onChanged: _seekFromSlider,
                   ),
                 ),
               ),

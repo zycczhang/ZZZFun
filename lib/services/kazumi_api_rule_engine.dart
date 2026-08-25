@@ -177,6 +177,7 @@ class KazumiApiRuleEngine {
             roadIndex: roadIndex,
             episodeIndex: episodeIndex,
             requestHeaders: _pageHeaders(rule),
+            mediaHeaders: _mediaHeaders(rule),
             useLegacyParser: rule.useLegacyParser,
           ),
         );
@@ -269,6 +270,7 @@ class KazumiApiRuleEngine {
             roadIndex: roadIndex,
             episodeIndex: episodeIndex,
             requestHeaders: _pageHeaders(rule),
+            mediaHeaders: _mediaHeaders(rule),
             useLegacyParser: rule.useLegacyParser,
           ),
         );
@@ -398,6 +400,7 @@ class KazumiApiRuleEngine {
             roadIndex: roadIndex,
             episodeIndex: episodeIndex,
             requestHeaders: _pageHeaders(rule),
+            mediaHeaders: _mediaHeaders(rule),
             useLegacyParser: rule.useLegacyParser,
           ),
         );
@@ -729,10 +732,12 @@ class KazumiApiRuleEngine {
 
   Map<String, String> _pageHeaders(KazumiRule rule) => {
     'User-Agent': rule.userAgent.isEmpty ? _defaultUserAgent : rule.userAgent,
-    if (rule.referer.isNotEmpty)
-      'Referer': rule.referer
-    else if (rule.baseUrl != null)
-      'Referer': rule.baseUrl.toString(),
+    if (rule.referer.isNotEmpty) 'Referer': rule.referer,
+  };
+
+  Map<String, String> _mediaHeaders(KazumiRule rule) => {
+    'User-Agent': rule.userAgent.isEmpty ? _defaultUserAgent : rule.userAgent,
+    if (rule.referer.isNotEmpty) 'Referer': rule.referer,
   };
 
   Map<String, dynamic> _expandMap(
