@@ -7,6 +7,8 @@ import 'package:video_player/video_player.dart';
 import '../anime_nav_widgets.dart';
 import '../models/anime_models.dart';
 import '../models/video_source_models.dart';
+import '../models/watch_history_models.dart';
+import '../services/anime_storage_service.dart';
 import '../services/video_resource_service.dart';
 import '../services/video_source_resolver.dart';
 import 'video_source_picker_dialog.dart';
@@ -14,12 +16,14 @@ import 'video_source_picker_dialog.dart';
 class VideoPlayerPage extends StatefulWidget {
   final AnimeItem item;
   final VideoPlaybackSelection selection;
+  final Duration initialPosition;
   final VideoResourceService resourceService;
 
   const VideoPlayerPage({
     super.key,
     required this.item,
     required this.selection,
+    this.initialPosition = Duration.zero,
     required this.resourceService,
   });
 
@@ -50,6 +54,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   final Map<String, FocusNode> _episodeFocusNodes = {};
 
   Timer? _seekDebounceTimer;
+  Timer? _historySaveTimer;
   Timer? _controlHideTimer;
   Duration? _targetSeekPosition;
   bool _isSeeking = false;
@@ -59,15 +64,20 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     super.initState();
     _selection = widget.selection;
     _selectedSourceIndex = _findSourceIndex(_selection.episode);
+    unawaited(_saveHistory(position: widget.initialPosition));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _playerFocusNode.requestFocus();
     });
-    unawaited(_loadEpisode(_selection.episode));
+    unawaited(
+      _loadEpisode(_selection.episode, initialPosition: widget.initialPosition),
+    );
   }
 
   @override
   void dispose() {
     _seekDebounceTimer?.cancel();
+    _historySaveTimer?.cancel();
+    unawaited(_saveHistory());
     _controller?.dispose();
     _playerFocusNode.dispose();
     _previousFocusNode.dispose();
@@ -89,6 +99,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
 
   int _findSourceIndex(VideoEpisode episode) {
     final sources = _selection.chapters.sources;
+    if (episode.roadIndex >= 0 &&
+        episode.roadIndex < sources.length &&
+        sources[episode.roadIndex].episodes.any(
+          (candidate) =>
+              candidate.pageUrl == episode.pageUrl &&
+              candidate.name == episode.name,
+        )) {
+      return episode.roadIndex;
+    }
     for (var index = 0; index < sources.length; index++) {
       if (sources[index].episodes.any(
         (candidate) =>
@@ -116,11 +135,16 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     );
   }
 
-  Future<void> _loadEpisode(VideoEpisode episode) async {
+  Future<void> _loadEpisode(
+    VideoEpisode episode, {
+    Duration initialPosition = Duration.zero,
+  }) async {
     final generation = ++_loadGeneration;
     final oldController = _controller;
     _controller = null;
     _seekDebounceTimer?.cancel();
+    _historySaveTimer?.cancel();
+    _historySaveTimer = null;
     _targetSeekPosition = null;
     _isSeeking = false;
     await oldController?.dispose();
@@ -150,6 +174,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       if (!mounted || generation != _loadGeneration) {
         await controller.dispose();
         return;
+      }
+      final resumePosition = _clampPosition(
+        initialPosition,
+        controller.value.duration,
+      );
+      if (resumePosition > Duration.zero) {
+        await controller.seekTo(resumePosition);
       }
       controller.addListener(_onVideoChanged);
       setState(() {
@@ -184,6 +215,33 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         _error = error;
       });
     }
+    if (controller?.value.isInitialized == true) _scheduleHistorySave();
+  }
+
+  Duration _clampPosition(Duration position, Duration duration) {
+    if (position <= Duration.zero || duration <= Duration.zero) {
+      return Duration.zero;
+    }
+    return position > duration ? duration : position;
+  }
+
+  void _scheduleHistorySave() {
+    if (!mounted || _historySaveTimer != null) return;
+    _historySaveTimer = Timer(const Duration(seconds: 5), () {
+      _historySaveTimer = null;
+      unawaited(_saveHistory());
+    });
+  }
+
+  Future<void> _saveHistory({Duration? position, Duration? duration}) async {
+    final controller = _controller;
+    final entry = WatchHistoryEntry.fromSelection(
+      item: widget.item,
+      selection: _selection,
+      position: position ?? controller?.value.position ?? Duration.zero,
+      duration: duration ?? controller?.value.duration ?? Duration.zero,
+    );
+    await AnimeStorageService.saveHistory(entry);
   }
 
   Future<void> _openSourcePicker() async {
@@ -200,6 +258,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       _selection = next;
       _selectedSourceIndex = _findSourceIndex(next.episode);
     });
+    unawaited(_saveHistory(position: Duration.zero, duration: Duration.zero));
     await _loadEpisode(next.episode);
   }
 
@@ -213,6 +272,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         episode: episode,
       );
     });
+    unawaited(_saveHistory(position: Duration.zero, duration: Duration.zero));
     unawaited(_loadEpisode(episode));
   }
 

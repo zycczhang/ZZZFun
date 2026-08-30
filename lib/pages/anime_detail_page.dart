@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../models/anime_models.dart';
 import '../models/video_source_models.dart';
+import '../models/watch_history_models.dart';
 import '../anime_nav_widgets.dart';
 import '../services/video_resource_service.dart';
 import '../widgets/anime_artwork.dart';
@@ -14,8 +15,10 @@ class AnimeDetailPage extends StatelessWidget {
   final AnimeItem item;
   final bool isFavorite;
   final bool loadingDetails;
+  final WatchHistoryEntry? historyEntry;
   final VoidCallback onBack;
   final VoidCallback onToggleFavorite;
+  final Future<void> Function()? onHistoryChanged;
   final VideoResourceService resourceService;
 
   const AnimeDetailPage({
@@ -23,8 +26,10 @@ class AnimeDetailPage extends StatelessWidget {
     required this.item,
     required this.isFavorite,
     this.loadingDetails = false,
+    this.historyEntry,
     required this.onBack,
     required this.onToggleFavorite,
+    this.onHistoryChanged,
     required this.resourceService,
   });
 
@@ -251,7 +256,9 @@ class AnimeDetailPage extends StatelessWidget {
           children: [
             _DetailActionButton(
               icon: Icons.play_arrow_rounded,
-              label: '开始观看',
+              label: historyEntry?.hasPlaybackSelection == true
+                  ? '继续播放'
+                  : '开始观看',
               focusedColor: primary,
               onTap: () => _openPlayback(context),
             ),
@@ -271,22 +278,88 @@ class AnimeDetailPage extends StatelessWidget {
   }
 
   Future<void> _openPlayback(BuildContext context) async {
-    final selection = await showDialog<VideoPlaybackSelection>(
+    final savedHistory = historyEntry;
+    var resumePosition = Duration.zero;
+    var selection = savedHistory?.hasPlaybackSelection == true
+        ? await _restoreSelection(savedHistory!)
+        : null;
+    if (selection != null) resumePosition = savedHistory!.position;
+    if (!context.mounted) return;
+    selection ??= await showDialog<VideoPlaybackSelection>(
       context: context,
       barrierDismissible: false,
       builder: (context) =>
           VideoSourcePickerDialog(item: item, resourceService: resourceService),
     );
-    if (selection == null || !context.mounted) return;
+    final playbackSelection = selection;
+    if (playbackSelection == null || !context.mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => VideoPlayerPage(
           item: item,
-          selection: selection,
+          selection: playbackSelection,
+          initialPosition: resumePosition,
           resourceService: resourceService,
         ),
       ),
     );
+    if (context.mounted) await onHistoryChanged?.call();
+  }
+
+  Future<VideoPlaybackSelection?> _restoreSelection(
+    WatchHistoryEntry history,
+  ) async {
+    try {
+      final rule = await resourceService.getInstalledRule(history.sourceSite);
+      if (rule == null) return null;
+      final searchItem = VideoSearchItem(
+        name: history.searchItemName.isEmpty
+            ? item.title
+            : history.searchItemName,
+        source: history.searchItemSource,
+        ruleName: rule.name,
+      );
+      final chapters = await resourceService.getChapters(rule, searchItem);
+      if (chapters.sources.isEmpty) return null;
+
+      var sourceIndex = chapters.sources.indexWhere(
+        (source) => source.name == history.sourceLine,
+      );
+      if (sourceIndex < 0 &&
+          history.sourceIndex >= 0 &&
+          history.sourceIndex < chapters.sources.length) {
+        sourceIndex = history.sourceIndex;
+      }
+      if (sourceIndex < 0) sourceIndex = 0;
+      final source = chapters.sources[sourceIndex];
+
+      VideoEpisode? episode;
+      if (history.episodeUrl.isNotEmpty) {
+        for (final candidate in source.episodes) {
+          if (candidate.pageUrl == history.episodeUrl) {
+            episode = candidate;
+            break;
+          }
+        }
+      }
+      episode ??= source.episodes.cast<VideoEpisode?>().firstWhere(
+        (candidate) => candidate!.episodeIndex == history.episodeIndex,
+        orElse: () => null,
+      );
+      episode ??= source.episodes.cast<VideoEpisode?>().firstWhere(
+        (candidate) => candidate!.name == history.episodeName,
+        orElse: () => null,
+      );
+      if (episode == null) return null;
+      return VideoPlaybackSelection(
+        rule: rule,
+        searchItem: searchItem,
+        chapters: chapters,
+        episode: episode,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   Widget _buildInfoRow(BuildContext context, bool compact) {

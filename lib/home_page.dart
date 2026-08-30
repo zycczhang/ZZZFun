@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'anime_nav_widgets.dart';
 import 'models/anime_models.dart';
 import 'models/bangumi_models.dart';
+import 'models/watch_history_models.dart';
 import 'pages/collection_page.dart';
 import 'pages/home_dashboard_page.dart';
 import 'pages/schedule_page.dart';
@@ -51,7 +52,7 @@ class _TvHomePageState extends State<TvHomePage> {
 
   List<AnimeItem> _popularItems = const [];
   List<AnimeItem> _favorites = const [];
-  List<AnimeItem> _history = const [];
+  List<WatchHistoryEntry> _history = const [];
   List<AnimeItem> _searchItems = const [];
   List<BangumiCalendarDay> _calendarDays = const [];
   bool _popularLoading = true;
@@ -305,8 +306,6 @@ class _TvHomePageState extends State<TvHomePage> {
       _detailItem = cachedItem ?? item;
       _detailLoading = item.bangumiId != null && cachedItem == null;
     });
-    await AnimeStorageService.addHistory(item);
-    await _loadLibrary();
     AppLogger.info('ui', '打开内容详情: ${item.title}');
     final subjectId = item.bangumiId;
     if (subjectId == null || _subjectDetailCache.containsKey(subjectId)) {
@@ -353,9 +352,11 @@ class _TvHomePageState extends State<TvHomePage> {
       return AnimeDetailPage(
         item: detailItem,
         isFavorite: _favorites.any((saved) => saved.id == detailItem.id),
+        historyEntry: _historyEntryFor(detailItem.id),
         loadingDetails: _detailLoading,
         onBack: _closeDetail,
         onToggleFavorite: () => unawaited(_toggleFavorite(detailItem)),
+        onHistoryChanged: _loadLibrary,
         resourceService: _videoResources,
       );
     }
@@ -375,6 +376,13 @@ class _TvHomePageState extends State<TvHomePage> {
         ],
       ),
     );
+  }
+
+  WatchHistoryEntry? _historyEntryFor(String itemId) {
+    for (final entry in _history) {
+      if (entry.item.id == itemId) return entry;
+    }
+    return null;
   }
 
   Widget _buildRail() {

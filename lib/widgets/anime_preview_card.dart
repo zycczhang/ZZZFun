@@ -11,6 +11,7 @@ class PreviewCard extends StatelessWidget {
   final double? width;
   final FocusNode? focusNode;
   final KeyEventResult Function(FocusNode node, KeyEvent event)? onKeyEvent;
+  final String? secondaryText;
   final VoidCallback onTap;
   final VoidCallback? onFavorite;
 
@@ -21,6 +22,7 @@ class PreviewCard extends StatelessWidget {
     this.width,
     this.focusNode,
     this.onKeyEvent,
+    this.secondaryText,
     required this.onTap,
     this.onFavorite,
   });
@@ -51,6 +53,19 @@ class PreviewCard extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               ItemMeta(item: item, compact: true),
+              if (secondaryText != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  secondaryText!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 10,
+                    height: 1.25,
+                  ),
+                ),
+              ],
             ],
           ),
         );
