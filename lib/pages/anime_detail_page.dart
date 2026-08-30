@@ -37,9 +37,11 @@ class AnimeDetailPage extends StatelessWidget {
       },
       child: Focus(
         onKeyEvent: (node, event) {
+          // Android TV's remote Back is also delivered through PopScope.
+          // Handling goBack here as well would close the detail and then pop
+          // the app's root route for the same physical button press.
           if (event is KeyDownEvent &&
-              (event.logicalKey == LogicalKeyboardKey.escape ||
-                  event.logicalKey == LogicalKeyboardKey.goBack)) {
+              event.logicalKey == LogicalKeyboardKey.escape) {
             onBack();
             return KeyEventResult.handled;
           }
