@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZZZFun 网页管理</title>
+  <style>
+    :root { color-scheme: dark; --bg: #0e1014; --panel: #171b22; --line: #2a3039; --muted: #8e96a3; --accent: #ffa116; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: #f4f5f7; font: 15px/1.5 system-ui, -apple-system, "Microsoft YaHei", sans-serif; }
+    header { display: flex; align-items: baseline; gap: 14px; max-width: 1040px; margin: 0 auto; padding: 28px 20px 20px; }
+    h1, h2 { margin: 0; } h1 { font-size: 24px; } h2 { font-size: 20px; }
+    header span, .muted { color: var(--muted); }
+    nav { position: sticky; top: 0; z-index: 2; display: flex; gap: 8px; padding: 0 max(20px, calc((100% - 1040px) / 2)); background: rgba(14,16,20,.95); border-bottom: 1px solid var(--line); }
+    nav button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 13px 18px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; }
+    nav button.active { border-bottom-color: var(--accent); color: var(--accent); }
+    main { max-width: 1040px; margin: 0 auto; padding: 26px 20px 60px; }
+    section { display: none; } section.active { display: block; }
+    form { display: flex; gap: 10px; margin: 18px 0 24px; }
+    input[type="text"] { min-width: 0; flex: 1; border: 1px solid var(--line); border-radius: 7px; padding: 12px 14px; outline: none; background: var(--panel); color: inherit; font: inherit; }
+    input[type="text"]:focus { border-color: var(--accent); }
+    button.action { border: 0; border-radius: 7px; padding: 10px 17px; background: var(--accent); color: #17110a; cursor: pointer; font: inherit; font-weight: 700; }
+    button.secondary { border: 1px solid var(--line); border-radius: 7px; padding: 9px 13px; background: var(--panel); color: inherit; cursor: pointer; font: inherit; }
+    button:disabled { cursor: not-allowed; opacity: .4; }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
+    .toolbar-actions { display: flex; gap: 8px; }
+    .list { display: grid; gap: 10px; }
+    .card { display: flex; align-items: center; gap: 15px; min-height: 104px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+    .poster { width: 62px; height: 82px; flex: 0 0 auto; border-radius: 5px; object-fit: cover; background: #252a32; }
+    .info { min-width: 0; flex: 1; } .title { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .subtitle { margin-top: 5px; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tag { display: inline-block; margin-top: 7px; color: var(--accent); font-size: 12px; }
+    .card button { flex: 0 0 auto; }
+    .empty { padding: 48px 10px; text-align: center; color: var(--muted); }
+    .pager { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 22px; }
+    .notice { min-height: 24px; color: var(--muted); }
+    @media (max-width: 560px) { header { padding-top: 20px; } form { flex-direction: column; } .card { align-items: flex-start; } .card button { align-self: center; } .toolbar { align-items: flex-start; flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <header><h1>ZZZFun</h1><span>电视端网页管理</span></header>
+  <nav>
+    <button class="active" data-tab="search">搜索</button>
+    <button data-tab="favorites">我的收藏</button>
+  </nav>
+  <main>
+    <section id="search-section" class="active">
+      <h2>搜索番剧</h2>
+      <form id="search-form">
+        <input id="search-input" type="text" autocomplete="off" placeholder="输入番剧名称">
+        <button class="action" type="submit">搜索</button>
+      </form>
+      <div id="search-notice" class="notice"></div>
+      <div id="search-results" class="list"></div>
+      <div id="search-pager" class="pager"></div>
+    </section>
+    <section id="favorites-section">
+      <div class="toolbar">
+        <div><h2>我的收藏</h2><div id="favorite-count" class="muted"></div></div>
+        <div class="toolbar-actions">
+          <button id="export-button" class="secondary" type="button">导出收藏</button>
+          <button id="import-button" class="secondary" type="button">导入收藏</button>
+          <input id="import-input" type="file" accept="application/json,.json" hidden>
+        </div>
+      </div>
+      <div id="favorite-notice" class="notice"></div>
+      <div id="favorite-list" class="list"></div>
+    </section>
+  </main>
+  <script>
+    const state = { searchPage: 0, searchKeyword: '', searchLimit: 20 };
+    const $ = (id) => document.getElementById(id);
+
+    document.querySelectorAll('nav button').forEach((button) => {
+      button.addEventListener('click', () => switchTab(button.dataset.tab));
+    });
+    $('search-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      state.searchKeyword = $('search-input').value.trim();
+      state.searchPage = 0;
+      doSearch();
+    });
+    $('export-button').addEventListener('click', exportFavorites);
+    $('import-button').addEventListener('click', () => $('import-input').click());
+    $('import-input').addEventListener('change', importFavorites);
+
+    function switchTab(tab) {
+      document.querySelectorAll('nav button').forEach((button) => button.classList.toggle('active', button.dataset.tab === tab));
+      $('search-section').classList.toggle('active', tab === 'search');
+      $('favorites-section').classList.toggle('active', tab === 'favorites');
+      if (tab === 'favorites') loadFavorites();
+    }
+
+    async function doSearch() {
+      if (!state.searchKeyword) { $('search-notice').textContent = '请输入番剧名称。'; $('search-results').replaceChildren(); $('search-pager').replaceChildren(); return; }
+      $('search-notice').textContent = '搜索中...';
+      try {
+        const query = new URLSearchParams({ keyword: state.searchKeyword, limit: state.searchLimit, offset: state.searchPage * state.searchLimit });
+        const response = await fetch(`/api/search?${query}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || '搜索失败');
+        renderList($('search-results'), data.items || []);
+        $('search-notice').textContent = (data.total || 0) + ' 个结果';
+        renderPager(data.hasNext, state.searchPage > 0, $('search-pager'), (delta) => { state.searchPage += delta; doSearch(); });
+      } catch (error) { $('search-notice').textContent = error.message || '搜索失败'; $('search-results').replaceChildren(); $('search-pager').replaceChildren(); }
+    }
+
+    async function loadFavorites() {
+      $('favorite-notice').textContent = '加载中...';
+      try {
+        const response = await fetch('/api/favorites');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || '加载失败');
+        renderList($('favorite-list'), data.items || []);
+        $('favorite-count').textContent = `${data.total || 0} 条收藏`;
+        $('favorite-notice').textContent = '';
+      } catch (error) { $('favorite-notice').textContent = error.message || '加载收藏失败'; }
+    }
+
+    function renderList(container, items) {
+      container.replaceChildren();
+      if (!items.length) { const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = '暂无内容'; container.appendChild(empty); return; }
+      items.forEach((item) => {
+        const card = document.createElement('article'); card.className = 'card';
+        const poster = document.createElement('img'); poster.className = 'poster'; poster.alt = ''; poster.src = item.posterUrl || ''; poster.onerror = () => { poster.style.visibility = 'hidden'; };
+        const info = document.createElement('div'); info.className = 'info';
+        const title = document.createElement('div'); title.className = 'title'; title.textContent = item.title || '未命名番剧';
+        const subtitle = document.createElement('div'); subtitle.className = 'subtitle'; subtitle.textContent = item.subtitle || '暂无简介';
+        const tag = document.createElement('div'); tag.className = 'tag'; tag.textContent = item.tag || '';
+        info.append(title, subtitle, tag);
+        const action = document.createElement('button'); action.className = item.isFavorite ? 'secondary' : 'action'; action.type = 'button'; action.textContent = item.isFavorite ? '取消收藏' : '收藏';
+        action.addEventListener('click', () => toggleFavorite(item, action));
+        card.append(poster, info, action); container.appendChild(card);
+      });
+    }
+
+    function renderPager(hasNext, hasPrevious, container, onPage) {
+      container.replaceChildren();
+      if (!hasNext && !hasPrevious) return;
+      const previous = document.createElement('button'); previous.className = 'secondary'; previous.textContent = '上一页'; previous.disabled = !hasPrevious; previous.onclick = () => onPage(-1);
+      const next = document.createElement('button'); next.className = 'secondary'; next.textContent = '下一页'; next.disabled = !hasNext; next.onclick = () => onPage(1);
+      const label = document.createElement('span'); label.className = 'muted'; label.textContent = `第 ${state.searchPage + 1} 页`;
+      container.append(previous, label, next);
+    }
+
+    async function toggleFavorite(item, button) {
+      button.disabled = true;
+      try {
+        const response = await fetch('/api/favorites/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
+        if (!response.ok) throw new Error('收藏操作失败');
+        item.isFavorite = !item.isFavorite;
+        if ($('favorites-section').classList.contains('active')) loadFavorites();
+        if (state.searchKeyword) doSearch();
+      } catch (error) { button.disabled = false; alert(error.message || '收藏操作失败'); }
+    }
+
+    async function exportFavorites() {
+      try {
+        const response = await fetch('/api/favorites'); const data = await response.json();
+        const blob = new Blob([JSON.stringify(data.items || [], null, 2)], { type: 'application/json' });
+        const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `zzzfun-favorites-${new Date().toISOString().slice(0, 10)}.json`; link.click(); URL.revokeObjectURL(link.href);
+      } catch (error) { alert(error.message || '导出失败'); }
+    }
+
+    async function importFavorites(event) {
+      const file = event.target.files[0]; if (!file) return;
+      try {
+        const data = JSON.parse(await file.text());
+        if (!Array.isArray(data)) throw new Error('收藏文件必须是数组格式');
+        if (!confirm(`确定导入 ${data.length} 条收藏吗？这会覆盖电视端现有收藏。`)) return;
+        const response = await fetch('/api/favorites/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        const result = await response.json(); if (!response.ok) throw new Error(result.message || '导入失败');
+        await loadFavorites(); alert(`已导入 ${result.total} 条收藏。`);
+      } catch (error) { alert(error.message || '导入失败'); }
+      finally { event.target.value = ''; }
+    }
+  </script>
+</body>
+</html>

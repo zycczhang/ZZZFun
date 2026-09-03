@@ -5,6 +5,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'home_page.dart';
 import 'services/app_logger.dart';
+import 'services/web_server_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,7 +28,10 @@ Future<void> main() async {
   }
 
   runZonedGuarded(
-    () => runApp(const ZZZFunApp()),
+    () {
+      runApp(const ZZZFunApp());
+      unawaited(WebServerService.startServer());
+    },
     (error, stackTrace) =>
         AppLogger.error('runtime', '未捕获的运行时异常', error, stackTrace),
   );

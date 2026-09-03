@@ -45,6 +45,17 @@ class AnimeStorageService {
     return true;
   }
 
+  static Future<int> replaceFavorites(List<AnimeItem> items) async {
+    final uniqueItems = <String, AnimeItem>{};
+    for (final item in items) {
+      if (item.id.isNotEmpty) uniqueItems[item.id] = item;
+    }
+    final storedItems = uniqueItems.values.toList(growable: false);
+    await _writeList(_favoritesKey, storedItems);
+    AppLogger.info('library', '已从网页端同步收藏: ${storedItems.length} 条');
+    return storedItems.length;
+  }
+
   static Future<void> saveHistory(WatchHistoryEntry entry) {
     final operation = _historyWriteQueue.then((_) async {
       final history = await _readHistory();

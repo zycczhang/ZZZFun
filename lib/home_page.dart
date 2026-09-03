@@ -15,6 +15,7 @@ import 'services/anime_storage_service.dart';
 import 'services/app_logger.dart';
 import 'services/bangumi_api_service.dart';
 import 'services/video_resource_service.dart';
+import 'services/web_server_service.dart';
 import 'pages/anime_detail_page.dart';
 
 class _CachedSearchPage {
@@ -71,6 +72,7 @@ class _TvHomePageState extends State<TvHomePage> {
   final Map<int, AnimeItem> _subjectDetailCache = <int, AnimeItem>{};
   final Map<String, _CachedSearchPage> _searchPageCache =
       <String, _CachedSearchPage>{};
+  StreamSubscription<String>? _serverEventSubscription;
 
   @override
   void initState() {
@@ -78,12 +80,18 @@ class _TvHomePageState extends State<TvHomePage> {
     _loadLibrary();
     _loadPopular();
     _loadCalendar();
+    _serverEventSubscription = ServerEventBus.stream.listen((event) {
+      if (event == ServerEventBus.eventRefreshData) {
+        unawaited(_loadLibrary());
+      }
+    });
   }
 
   @override
   void dispose() {
     _bangumiApi.close();
     _videoResources.close();
+    unawaited(_serverEventSubscription?.cancel());
     super.dispose();
   }
 
@@ -533,6 +541,7 @@ class _TvHomePageState extends State<TvHomePage> {
           pageNumber: _searchPageOffset ~/ _searchPageSize + 1,
           hasPrevious: _searchPageOffset > 0,
           hasNext: _searchHasNext,
+          webServerUrl: WebServerService.serverUrlNotifier,
           onSearch: _searchAnime,
           onPageChanged: (delta) => unawaited(_changeSearchPage(delta)),
           onOpen: (item) => unawaited(_openItem(item)),
