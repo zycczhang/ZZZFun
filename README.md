@@ -78,6 +78,15 @@ flutter run
 flutter build apk --debug
 ```
 
+构建带时间戳版本的 Android Release APK（Windows PowerShell）：
+
+```powershell
+.\tool\build_release.ps1
+```
+
+脚本会用当前时间生成 `versionName` 和 Unix 时间戳 `versionCode`，并将 APK 输出为
+`build/releases/zzzfun-release-YYYYMMDD-HHmmss.apk`。这样电视端安装新包时版本号会高于之前的测试包；如果仍提示签名不一致，则说明旧包使用了不同签名，需要先卸载旧包。
+
 ## 项目结构
 
 ```text

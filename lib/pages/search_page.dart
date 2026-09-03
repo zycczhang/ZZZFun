@@ -18,6 +18,8 @@ class SearchPage extends StatefulWidget {
   final int pageNumber;
   final bool hasPrevious;
   final bool hasNext;
+  final FocusNode queryFocusNode;
+  final FocusNode navigationFocusNode;
   final ValueListenable<String> webServerUrl;
   final Future<void> Function(String query) onSearch;
   final ValueChanged<int> onPageChanged;
@@ -33,6 +35,8 @@ class SearchPage extends StatefulWidget {
     required this.pageNumber,
     required this.hasPrevious,
     required this.hasNext,
+    required this.queryFocusNode,
+    required this.navigationFocusNode,
     required this.webServerUrl,
     required this.onSearch,
     required this.onPageChanged,
@@ -50,23 +54,20 @@ class _SearchPageState extends State<SearchPage> {
   late final FocusNode _previousPageFocusNode;
   late final FocusNode _nextPageFocusNode;
   late final FocusNode _searchActionFocusNode;
+  bool _isEditingQuery = false;
 
   @override
   void initState() {
     super.initState();
     _queryController = TextEditingController(text: widget.initialQuery);
-    _queryFocusNode = FocusNode(debugLabel: 'ZZZFunSearchInput');
+    _queryFocusNode = widget.queryFocusNode;
     _queryFocusNode.onKeyEvent = _handleQueryKeyEvent;
+    _queryFocusNode.addListener(_handleQueryFocusChange);
     _firstResultFocusNode = FocusNode(debugLabel: 'ZZZFunSearchFirstResult');
     _previousPageFocusNode = FocusNode(debugLabel: 'ZZZFunSearchPreviousPage');
     _nextPageFocusNode = FocusNode(debugLabel: 'ZZZFunSearchNextPage');
     _searchActionFocusNode = FocusNode(debugLabel: 'ZZZFunSearchAction');
     _searchActionFocusNode.onKeyEvent = _handleSearchActionKeyEvent;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _queryFocusNode.requestFocus();
-      unawaited(_showSystemKeyboard());
-    });
   }
 
   @override
@@ -83,8 +84,10 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   void dispose() {
+    unawaited(_hideSystemKeyboard());
     _queryController.dispose();
-    _queryFocusNode.dispose();
+    _queryFocusNode.onKeyEvent = null;
+    _queryFocusNode.removeListener(_handleQueryFocusChange);
     _firstResultFocusNode.dispose();
     _previousPageFocusNode.dispose();
     _nextPageFocusNode.dispose();
@@ -92,9 +95,67 @@ class _SearchPageState extends State<SearchPage> {
     super.dispose();
   }
 
+  void _handleQueryFocusChange() {
+    if (!_queryFocusNode.hasFocus && _isEditingQuery && mounted) {
+      setState(() => _isEditingQuery = false);
+    }
+  }
+
+  bool _isActivateKey(LogicalKeyboardKey key) {
+    return key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
+        key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.space;
+  }
+
+  void _beginQueryEditing() {
+    if (_isEditingQuery) return;
+    _queryFocusNode.requestFocus();
+    setState(() => _isEditingQuery = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_isEditingQuery || !_queryFocusNode.hasFocus) return;
+      unawaited(_showSystemKeyboard());
+    });
+  }
+
+  void _stopQueryEditing() {
+    if (!_isEditingQuery) return;
+    setState(() => _isEditingQuery = false);
+    unawaited(_hideSystemKeyboard());
+  }
+
   KeyEventResult _handleQueryKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is KeyDownEvent &&
-        event.logicalKey == LogicalKeyboardKey.arrowDown) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+    if (!_isEditingQuery && _isActivateKey(event.logicalKey)) {
+      _beginQueryEditing();
+      return KeyEventResult.handled;
+    }
+
+    if (_isEditingQuery && event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _stopQueryEditing();
+      _searchActionFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+
+    if (!_isEditingQuery && event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _searchActionFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+
+    if (_isEditingQuery && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      _stopQueryEditing();
+      widget.navigationFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+
+    if (!_isEditingQuery && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      widget.navigationFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      if (_isEditingQuery) _stopQueryEditing();
       if (widget.items.isNotEmpty) {
         _firstResultFocusNode.requestFocus();
         return KeyEventResult.handled;
@@ -114,8 +175,7 @@ class _SearchPageState extends State<SearchPage> {
   KeyEventResult _handleSearchActionKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-      _queryFocusNode.requestFocus();
-      unawaited(_showSystemKeyboard());
+      widget.navigationFocusNode.requestFocus();
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowDown &&
@@ -157,9 +217,9 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   void _submit() {
+    _stopQueryEditing();
     FocusManager.instance.primaryFocus?.unfocus();
     _searchActionFocusNode.requestFocus();
-    unawaited(_hideSystemKeyboard());
     unawaited(widget.onSearch(_queryController.text));
   }
 
@@ -206,11 +266,19 @@ class _SearchPageState extends State<SearchPage> {
                   child: TextField(
                     controller: _queryController,
                     focusNode: _queryFocusNode,
-                    autofocus: true,
+                    autofocus: false,
+                    readOnly: !_isEditingQuery,
+                    showCursor: _isEditingQuery,
                     keyboardType: TextInputType.text,
                     textInputAction: TextInputAction.search,
-                    onTap: () => unawaited(_showSystemKeyboard()),
-                    onSubmitted: (_) => _submit(),
+                    onTap: _beginQueryEditing,
+                    onSubmitted: (_) {
+                      if (_isEditingQuery) {
+                        _submit();
+                      } else {
+                        _beginQueryEditing();
+                      }
+                    },
                     style: const TextStyle(fontSize: 17),
                     decoration: InputDecoration(
                       hintText: '搜索动漫',

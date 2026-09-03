@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'anime_nav_widgets.dart';
 import 'models/anime_models.dart';
@@ -67,6 +68,12 @@ class _TvHomePageState extends State<TvHomePage> {
   String _searchQuery = '';
   int _searchPageOffset = 0;
   int _searchRequestId = 0;
+  final FocusNode _searchRailFocusNode = FocusNode(
+    debugLabel: 'ZZZFunSearchRail',
+  );
+  final FocusNode _searchInputFocusNode = FocusNode(
+    debugLabel: 'ZZZFunSearchInput',
+  );
   AnimeItem? _detailItem;
   bool _detailLoading = false;
   final Map<int, AnimeItem> _subjectDetailCache = <int, AnimeItem>{};
@@ -89,6 +96,8 @@ class _TvHomePageState extends State<TvHomePage> {
 
   @override
   void dispose() {
+    _searchInputFocusNode.dispose();
+    _searchRailFocusNode.dispose();
     _bangumiApi.close();
     _videoResources.close();
     unawaited(_serverEventSubscription?.cancel());
@@ -300,6 +309,16 @@ class _TvHomePageState extends State<TvHomePage> {
     setState(() => _selectedWeekday = weekday);
   }
 
+  KeyEventResult _handleSearchRailKeyEvent(FocusNode node, KeyEvent event) {
+    if (_selectedPage != 4 ||
+        event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.arrowRight) {
+      return KeyEventResult.ignored;
+    }
+    _searchInputFocusNode.requestFocus();
+    return KeyEventResult.handled;
+  }
+
   Future<void> _toggleFavorite(AnimeItem item) async {
     await AnimeStorageService.toggleFavorite(item);
     await _loadLibrary();
@@ -419,7 +438,13 @@ class _TvHomePageState extends State<TvHomePage> {
               ),
             ),
             const SizedBox(height: 42),
-            _buildRailButton(4, Icons.search_rounded, '搜索'),
+            _buildRailButton(
+              4,
+              Icons.search_rounded,
+              '搜索',
+              focusNode: _searchRailFocusNode,
+              onKeyEvent: _handleSearchRailKeyEvent,
+            ),
             _buildRailButton(0, Icons.home_rounded, '首页'),
             _buildRailButton(1, Icons.calendar_month_outlined, '日期表'),
             _buildRailButton(2, Icons.bookmark_border_rounded, '片单'),
@@ -432,13 +457,21 @@ class _TvHomePageState extends State<TvHomePage> {
     );
   }
 
-  Widget _buildRailButton(int index, IconData icon, String label) {
+  Widget _buildRailButton(
+    int index,
+    IconData icon,
+    String label, {
+    FocusNode? focusNode,
+    KeyEventResult Function(FocusNode node, KeyEvent event)? onKeyEvent,
+  }) {
     final selected = _selectedPage == index;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Tooltip(
         message: label,
         child: FocusableWidget(
+          focusNode: focusNode,
+          onKeyEvent: onKeyEvent,
           autofocus: index == 0,
           onTap: () {
             AppLogger.debug('ui', '切换页面: $label');
@@ -541,6 +574,8 @@ class _TvHomePageState extends State<TvHomePage> {
           pageNumber: _searchPageOffset ~/ _searchPageSize + 1,
           hasPrevious: _searchPageOffset > 0,
           hasNext: _searchHasNext,
+          queryFocusNode: _searchInputFocusNode,
+          navigationFocusNode: _searchRailFocusNode,
           webServerUrl: WebServerService.serverUrlNotifier,
           onSearch: _searchAnime,
           onPageChanged: (delta) => unawaited(_changeSearchPage(delta)),

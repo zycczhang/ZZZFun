@@ -76,23 +76,34 @@ class SchedulePage extends StatelessWidget {
                 ),
               )
             else
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: items.length,
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 190,
-                  childAspectRatio: 0.55,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 24,
-                ),
-                itemBuilder: (context, index) {
-                  final item = items[index];
-                  return PreviewCard(
-                    item: item,
-                    isFavorite: isFavorite(item),
-                    onTap: () => onOpen(item),
-                    onFavorite: () => onToggleFavorite(item),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final columns = constraints.maxWidth >= 760
+                      ? 5
+                      : constraints.maxWidth >= 600
+                      ? 4
+                      : constraints.maxWidth >= 560
+                      ? 3
+                      : 2;
+                  return GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: items.length,
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: columns,
+                      childAspectRatio: 0.55,
+                      crossAxisSpacing: 22,
+                      mainAxisSpacing: 26,
+                    ),
+                    itemBuilder: (context, index) {
+                      final item = items[index];
+                      return PreviewCard(
+                        item: item,
+                        isFavorite: isFavorite(item),
+                        onTap: () => onOpen(item),
+                        onFavorite: () => onToggleFavorite(item),
+                      );
+                    },
                   );
                 },
               ),
