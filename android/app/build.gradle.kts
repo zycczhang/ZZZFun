@@ -33,6 +33,8 @@ android {
 
     buildTypes {
         release {
+            // Release 会额外执行 R8、lintVital、资源优化和各 ABI 的 CMake/JNI 构建，
+            // 因此首次打包或缓存失效时会明显慢于 Debug；等待完成即可，不要重复点击构建。
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
