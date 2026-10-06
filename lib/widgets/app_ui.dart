@@ -3,6 +3,26 @@ import 'package:flutter/material.dart';
 import '../models/anime_models.dart';
 import '../services/app_logger.dart';
 
+const animeGridCrossAxisSpacing = 22.0;
+const animeGridMainAxisSpacing = 26.0;
+const animeGridMinCardWidth = 133.0;
+const animeGridMinColumns = 2;
+const animeGridMaxColumns = 5;
+
+/// Chooses a readable number of anime cards for the available logical width.
+///
+/// The width is the grid's content width after page padding, rather than the
+/// TV's physical pixel width. With the current card and spacing sizes, a
+/// content width of about 760 logical pixels produces five cards.
+int adaptiveAnimeGridColumnCount(double width) {
+  if (!width.isFinite || width <= 0) return animeGridMinColumns;
+  final columns =
+      ((width + animeGridCrossAxisSpacing) /
+              (animeGridMinCardWidth + animeGridCrossAxisSpacing))
+          .floor();
+  return columns.clamp(animeGridMinColumns, animeGridMaxColumns).toInt();
+}
+
 class AppPage extends StatelessWidget {
   final Widget child;
 

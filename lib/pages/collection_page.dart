@@ -105,23 +105,57 @@ class _LibraryGrid extends StatelessWidget {
         message: emptyMessage,
       );
     }
-    return GridView.builder(
-      padding: const EdgeInsets.only(bottom: 20),
-      itemCount: items.length,
-      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 190,
-        childAspectRatio: detailByItemId.isEmpty ? 0.55 : 0.5,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 24,
-      ),
-      itemBuilder: (context, index) {
-        final item = items[index];
-        return PreviewCard(
-          item: item,
-          isFavorite: isFavorite,
-          secondaryText: detailByItemId[item.id],
-          onTap: () => onOpen(item),
-          onFavorite: onFavorite == null ? null : () => onFavorite!(item),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columnCount = adaptiveAnimeGridColumnCount(
+          constraints.maxWidth,
+        );
+        const spacing = animeGridCrossAxisSpacing;
+        const posterAspectRatio = 0.67;
+        // Match PreviewCard's poster, title/meta rows, and optional two-line
+        // history summary so the grid height follows the computed card width.
+        const cardTextTopGap = 9.0;
+        const titleLineHeight = 17.0;
+        const titleToMetaGap = 4.0;
+        const metadataLineHeight = 13.0;
+        const historySummaryGap = 4.0;
+        const historySummaryHeight = 25.0;
+        const focusRoom = 10.0;
+        final cardWidth =
+            (constraints.maxWidth - spacing * (columnCount - 1)) / columnCount;
+        final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+        final hasHistoryDetails = detailByItemId.isNotEmpty;
+        final cardDetailsHeight =
+            (cardTextTopGap +
+                titleLineHeight +
+                titleToMetaGap +
+                metadataLineHeight +
+                (hasHistoryDetails
+                    ? historySummaryGap + historySummaryHeight
+                    : 0) +
+                focusRoom) *
+            textScale;
+        final cardHeight = cardWidth / posterAspectRatio + cardDetailsHeight;
+
+        return GridView.builder(
+          padding: const EdgeInsets.only(bottom: 20),
+          itemCount: items.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columnCount,
+            childAspectRatio: cardWidth / cardHeight,
+            crossAxisSpacing: spacing,
+            mainAxisSpacing: animeGridMainAxisSpacing,
+          ),
+          itemBuilder: (context, index) {
+            final item = items[index];
+            return PreviewCard(
+              item: item,
+              isFavorite: isFavorite,
+              secondaryText: detailByItemId[item.id],
+              onTap: () => onOpen(item),
+              onFavorite: onFavorite == null ? null : () => onFavorite!(item),
+            );
+          },
         );
       },
     );

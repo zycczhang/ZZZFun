@@ -78,13 +78,9 @@ class SchedulePage extends StatelessWidget {
             else
               LayoutBuilder(
                 builder: (context, constraints) {
-                  final columns = constraints.maxWidth >= 760
-                      ? 5
-                      : constraints.maxWidth >= 600
-                      ? 4
-                      : constraints.maxWidth >= 560
-                      ? 3
-                      : 2;
+                  final columns = adaptiveAnimeGridColumnCount(
+                    constraints.maxWidth,
+                  );
                   return GridView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -92,8 +88,8 @@ class SchedulePage extends StatelessWidget {
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: columns,
                       childAspectRatio: 0.55,
-                      crossAxisSpacing: 22,
-                      mainAxisSpacing: 26,
+                      crossAxisSpacing: animeGridCrossAxisSpacing,
+                      mainAxisSpacing: animeGridMainAxisSpacing,
                     ),
                     itemBuilder: (context, index) {
                       final item = items[index];

@@ -643,9 +643,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       child: Focus(
         onKeyEvent: (node, event) {
           if (event is KeyDownEvent &&
-              (event.logicalKey == LogicalKeyboardKey.escape ||
-                  event.logicalKey == LogicalKeyboardKey.goBack) &&
+              event.logicalKey == LogicalKeyboardKey.escape &&
               _fullscreen) {
+            // Android TV's remote Back is also delivered through PopScope.
+            // Handle Escape here, but let PopScope handle goBack to avoid
+            // exiting fullscreen and popping the player for one button press.
             _exitFullscreen();
             return KeyEventResult.handled;
           }
