@@ -198,7 +198,17 @@ class DataStatePanel extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 42, color: loading ? primary : Colors.white38),
+            if (loading)
+              SizedBox(
+                width: 42,
+                height: 42,
+                child: CircularProgressIndicator(
+                  strokeWidth: 3,
+                  color: primary,
+                ),
+              )
+            else
+              Icon(icon, size: 42, color: Colors.white38),
             const SizedBox(height: 14),
             Text(
               title,

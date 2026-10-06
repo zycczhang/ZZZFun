@@ -89,12 +89,19 @@ class _HomeDashboardState extends State<HomeDashboard> {
             const SizedBox(height: 10),
             SectionHeading(
               title: '热门番剧',
-              caption: widget.popularItems.isEmpty
-                  ? '暂无数据'
-                  : '${widget.popularItems.length} 部',
+              caption: widget.popularLoading
+                  ? '加载中'
+                  : widget.popularItems.isEmpty
+                      ? '暂无数据'
+                      : '${widget.popularItems.length} 部',
             ),
             const SizedBox(height: 10),
-            if (widget.popularItems.isEmpty)
+            if (widget.popularLoading)
+              const SizedBox(
+                height: 180,
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (widget.popularItems.isEmpty)
               const SizedBox(
                 height: 180,
                 child: Center(
