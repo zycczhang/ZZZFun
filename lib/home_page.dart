@@ -392,12 +392,12 @@ class _TvHomePageState extends State<TvHomePage> {
         children: [
           _buildRail(),
           Expanded(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              child: KeyedSubtree(
-                key: ValueKey(_selectedPage),
-                child: _buildPage(),
-              ),
+            // Switching between full pages should be immediate. AnimatedSwitcher
+            // fades two complete page trees at once, which is expensive on TV
+            // hardware when the page contains a poster grid.
+            child: KeyedSubtree(
+              key: ValueKey(_selectedPage),
+              child: _buildPage(),
             ),
           ),
         ],
