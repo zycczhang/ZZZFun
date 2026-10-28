@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$BuildName = "1.0.0"
 )
 
