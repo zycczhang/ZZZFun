@@ -129,3 +129,13 @@ test/
 ## 第三方规则
 
 ZZZFun 使用 [Predidit/KazumiRules](https://github.com/Predidit/KazumiRules) 提供的规则文件。规则文件在运行时从公开仓库读取，ZZZFun 自己实现网络请求和 API Level 8 规则解析，不复制 Kazumi 项目的 GPL-3.0 执行代码。KazumiRules 仓库使用 MIT License，相关版权和许可信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。规则只描述如何请求第三方网站，规则仓库不代表第三方网站内容或播放地址的授权。
+
+### 规则仓库镜像
+
+规则索引和规则文件默认先从 KazumiRules GitHub 仓库获取；失败后先尝试 Gitee raw 镜像 `https://gitee.com/zyc1522416243/KazumiRules/raw/main/`，最后尝试 jsDelivr。每个源的请求超时为 10 秒。如需替换 Gitee 镜像地址，可在构建时覆盖：
+
+```powershell
+flutter build <target> --dart-define=KAZUMI_RULES_GITEE_RAW_BASE=https://gitee.com/<owner>/<repo>/raw/main/
+```
+
+配置值应为公开可读的 raw 根路径，并以 `/` 结尾；例如 `index.json` 应能通过 `${KAZUMI_RULES_GITEE_RAW_BASE}index.json` 读取。规则仓库应保持上游目录结构和文件名不变；Gitee 镜像的同步频率由镜像维护者负责。

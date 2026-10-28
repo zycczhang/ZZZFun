@@ -18,10 +18,12 @@ class KazumiRuleRepositoryPage extends StatefulWidget {
       _KazumiRuleRepositoryPageState();
 }
 
-class _KazumiRuleRepositoryPageState extends State<KazumiRuleRepositoryPage> {
+class _KazumiRuleRepositoryPageState extends State<KazumiRuleRepositoryPage>
+    with SingleTickerProviderStateMixin {
   List<KazumiRuleCatalogEntry> _catalog = const [];
   Map<String, KazumiRule> _installed = const {};
   final Set<String> _busyRules = {};
+  late final AnimationController _refreshAnimationController;
   bool _loading = true;
   bool _remoteCheckFailed = false;
   String? _error;
@@ -37,11 +39,24 @@ class _KazumiRuleRepositoryPageState extends State<KazumiRuleRepositoryPage> {
   @override
   void initState() {
     super.initState();
+    _refreshAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
     unawaited(_load());
   }
 
+  @override
+  void dispose() {
+    _refreshAnimationController.dispose();
+    super.dispose();
+  }
+
   Future<void> _load({bool forceRefresh = false}) async {
-    if (mounted) setState(() => _loading = true);
+    if (mounted) {
+      setState(() => _loading = true);
+      _refreshAnimationController.repeat();
+    }
     List<KazumiRule> installedRules = const [];
     try {
       installedRules = await widget.resourceService.getInstalledRules();
@@ -89,6 +104,7 @@ class _KazumiRuleRepositoryPageState extends State<KazumiRuleRepositoryPage> {
             ? '规则仓库加载失败，请检查网络后重试。'
             : null;
       });
+      _stopRefreshAnimation();
     } catch (error, stackTrace) {
       AppLogger.warning('kazumi-rules', '规则仓库加载失败', error, stackTrace);
       if (!mounted) return;
@@ -97,7 +113,14 @@ class _KazumiRuleRepositoryPageState extends State<KazumiRuleRepositoryPage> {
         _remoteCheckFailed = forceRefresh;
         _error = '规则仓库加载失败，请检查网络后重试。';
       });
+      _stopRefreshAnimation();
     }
+  }
+
+  void _stopRefreshAnimation() {
+    _refreshAnimationController
+      ..stop()
+      ..value = 0;
   }
 
   Future<void> _install(
@@ -237,6 +260,7 @@ class _KazumiRuleRepositoryPageState extends State<KazumiRuleRepositoryPage> {
         const SizedBox(width: 10),
         _HeaderIconButton(
           icon: _loading ? Icons.sync_rounded : Icons.refresh_rounded,
+          iconTurns: _loading ? _refreshAnimationController : null,
           tooltip: '检查远程规则更新',
           onTap: _loading ? null : () => unawaited(_checkRemoteUpdates()),
         ),
@@ -387,11 +411,13 @@ class _KazumiRuleRepositoryPageState extends State<KazumiRuleRepositoryPage> {
 
 class _HeaderIconButton extends StatelessWidget {
   final IconData icon;
+  final Animation<double>? iconTurns;
   final String tooltip;
   final VoidCallback? onTap;
 
   const _HeaderIconButton({
     required this.icon,
+    this.iconTurns,
     required this.tooltip,
     required this.onTap,
   });
@@ -413,11 +439,20 @@ class _HeaderIconButton extends StatelessWidget {
                 : Colors.white.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(7),
           ),
-          child: Icon(
-            icon,
-            size: 20,
-            color: focused ? Colors.black : Colors.white70,
-          ),
+          child: iconTurns == null
+              ? Icon(
+                  icon,
+                  size: 20,
+                  color: focused ? Colors.black : Colors.white70,
+                )
+              : RotationTransition(
+                  turns: iconTurns!,
+                  child: Icon(
+                    icon,
+                    size: 20,
+                    color: focused ? Colors.black : Colors.white70,
+                  ),
+                ),
         ),
       ),
     );

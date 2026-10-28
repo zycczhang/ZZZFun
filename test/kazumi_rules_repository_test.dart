@@ -145,4 +145,67 @@ void main() {
     expect((await repository.refreshCatalog()).single.version, '2.0');
     await repository.close();
   });
+
+  test(
+    'uses the configured mirror when the primary rules repository fails',
+    () async {
+      final requestedUris = <Uri>[];
+      final client = MockClient((request) async {
+        requestedUris.add(request.url);
+        if (request.url.host == 'primary.example') {
+          return http.Response('unavailable', 503);
+        }
+        if (request.url.path.endsWith('/index.json')) {
+          return http.Response(
+            jsonEncode([
+              {
+                'name': 'demo',
+                'version': '1.0',
+                'useNativePlayer': true,
+                'antiCrawlerEnabled': false,
+              },
+            ]),
+            200,
+          );
+        }
+        if (request.url.path.endsWith('/demo.json')) {
+          return http.Response(
+            jsonEncode({
+              'api': '8',
+              'type': 'anime',
+              'name': 'demo',
+              'version': '1.0',
+              'searchMode': 'api',
+              'chapterMode': 'api',
+              'searchApiConfig': {'request': {}},
+              'chapterApiConfig': {'request': {}},
+            }),
+            200,
+          );
+        }
+        return http.Response('not found', 404);
+      });
+      final repository = KazumiRulesRepository(
+        client: client,
+        indexUri: Uri.parse('https://primary.example/index.json'),
+        ruleBaseUri: Uri.parse('https://primary.example/'),
+        mirrorIndexUri: Uri.parse('https://gitee.example/mirror/index.json'),
+        mirrorRuleBaseUri: Uri.parse('https://gitee.example/mirror/'),
+        persistenceEnabled: false,
+      );
+
+      expect((await repository.getCatalog()).single.name, 'demo');
+      expect((await repository.getRule('demo')).name, 'demo');
+      expect(
+        requestedUris,
+        containsAll([
+          Uri.parse('https://primary.example/index.json'),
+          Uri.parse('https://gitee.example/mirror/index.json'),
+          Uri.parse('https://primary.example/demo.json'),
+          Uri.parse('https://gitee.example/mirror/demo.json'),
+        ]),
+      );
+      await repository.close();
+    },
+  );
 }

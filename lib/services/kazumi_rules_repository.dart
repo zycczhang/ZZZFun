@@ -37,12 +37,19 @@ class KazumiRulesRepository {
   static final _fallbackRuleBaseUri = Uri.parse(
     'https://cdn.jsdelivr.net/gh/Predidit/KazumiRules@main/',
   );
+  // Set at build time to the public Gitee mirror, for example:
+  // --dart-define=KAZUMI_RULES_GITEE_RAW_BASE=https://gitee.com/<owner>/<repo>/raw/main/
+  static const _giteeRawBase = String.fromEnvironment(
+    'KAZUMI_RULES_GITEE_RAW_BASE',
+    defaultValue:
+        'https://gitee.com/zyc1522416243/KazumiRules/raw/main/',
+  );
 
   final http.Client _client;
   final Uri _indexUri;
   final Uri _ruleBaseUri;
-  final Uri? _indexFallbackUri;
-  final Uri? _ruleFallbackBaseUri;
+  final List<Uri> _indexFallbackUris;
+  final List<Uri> _ruleFallbackBaseUris;
   final Duration _timeout;
   final bool _ownsClient;
   final bool _persistenceEnabled;
@@ -55,13 +62,27 @@ class KazumiRulesRepository {
     http.Client? client,
     Uri? indexUri,
     Uri? ruleBaseUri,
-    Duration timeout = const Duration(seconds: 15),
+    Uri? mirrorIndexUri,
+    Uri? mirrorRuleBaseUri,
+    Duration timeout = const Duration(seconds: 10),
     bool persistenceEnabled = true,
   }) : _client = client ?? http.Client(),
        _indexUri = indexUri ?? _defaultIndexUri,
        _ruleBaseUri = ruleBaseUri ?? _defaultRuleBaseUri,
-       _indexFallbackUri = indexUri == null ? _fallbackIndexUri : null,
-       _ruleFallbackBaseUri = ruleBaseUri == null ? _fallbackRuleBaseUri : null,
+       _indexFallbackUris = _fallbackUris(
+         primary: indexUri ?? _defaultIndexUri,
+         defaultPrimary: indexUri == null,
+         explicitMirror: mirrorIndexUri,
+         giteeBase: _giteeBaseUri,
+         isIndex: true,
+       ),
+       _ruleFallbackBaseUris = _fallbackUris(
+         primary: ruleBaseUri ?? _defaultRuleBaseUri,
+         defaultPrimary: ruleBaseUri == null,
+         explicitMirror: mirrorRuleBaseUri,
+         giteeBase: _giteeBaseUri,
+         isIndex: false,
+       ),
        _timeout = timeout,
        _ownsClient = client == null,
        _persistenceEnabled = persistenceEnabled;
@@ -75,7 +96,7 @@ class KazumiRulesRepository {
       final response = await _request(
         '获取 KazumiRules 索引',
         _indexUri,
-        fallback: _indexFallbackUri,
+        fallbacks: _indexFallbackUris,
       );
       final decoded = _decodeList(response);
       final catalog = decoded
@@ -99,7 +120,7 @@ class KazumiRulesRepository {
     final response = await _request(
       '获取 KazumiRules 索引',
       _indexUri,
-      fallback: _indexFallbackUri,
+      fallbacks: _indexFallbackUris,
     );
     final decoded = _decodeList(response);
     final catalog = decoded
@@ -226,18 +247,34 @@ class KazumiRulesRepository {
     final response = await _request(
       '获取规则 $normalizedName',
       _ruleBaseUri.resolve('$normalizedName.json'),
-      fallback: _ruleFallbackBaseUri?.resolve('$normalizedName.json'),
+      fallbacks: _ruleFallbackBaseUris
+          .map((base) => base.resolve('$normalizedName.json'))
+          .toList(growable: false),
     );
     return _decodeMap(response);
   }
 
-  Future<dynamic> _request(String operation, Uri uri, {Uri? fallback}) async {
+  Future<dynamic> _request(
+    String operation,
+    Uri uri, {
+    List<Uri> fallbacks = const [],
+  }) async {
     Object? lastError;
     StackTrace? lastStackTrace;
-    final candidates = [uri, if (fallback != null && fallback != uri) fallback];
+    final candidates = <Uri>[
+      uri,
+      ...fallbacks.where((candidate) => candidate != uri),
+    ];
     for (final candidate in candidates) {
       try {
-        return await _requestOnce(operation, candidate);
+        final response = await _requestOnce(operation, candidate);
+        if (candidate != uri) {
+          AppLogger.info(
+            'kazumi-rules',
+            '$operation 已切换到备用源: ${candidate.host}',
+          );
+        }
+        return response;
       } catch (error, stackTrace) {
         lastError = error;
         lastStackTrace = stackTrace;
@@ -375,6 +412,35 @@ class KazumiRulesRepository {
     'Accept': 'application/json',
     'User-Agent': 'ZZZFun/1.0',
   };
+
+  static Uri? get _giteeBaseUri {
+    final value = _giteeRawBase.trim();
+    if (value.isEmpty) return null;
+    final uri = Uri.tryParse(value.endsWith('/') ? value : '$value/');
+    if (uri == null || (uri.scheme != 'https' && uri.scheme != 'http')) {
+      return null;
+    }
+    return uri;
+  }
+
+  static List<Uri> _fallbackUris({
+    required Uri primary,
+    required bool defaultPrimary,
+    required Uri? explicitMirror,
+    required Uri? giteeBase,
+    required bool isIndex,
+  }) {
+    final candidates = <Uri>[];
+    if (explicitMirror != null) {
+      candidates.add(explicitMirror);
+    } else if (giteeBase != null) {
+      candidates.add(isIndex ? giteeBase.resolve('index.json') : giteeBase);
+    }
+    if (defaultPrimary) {
+      candidates.add(isIndex ? _fallbackIndexUri : _fallbackRuleBaseUri);
+    }
+    return candidates.where((uri) => uri != primary).toList(growable: false);
+  }
 
   List<Map<String, dynamic>> _decodeList(Object? value) {
     if (value is! List) {
