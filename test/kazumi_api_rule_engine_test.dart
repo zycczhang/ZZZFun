@@ -28,10 +28,12 @@ void main() {
       expect(request.headers['Accept-Language'], 'zh-CN,zh;q=0.9');
       expect(request.headers['Connection'], 'keep-alive');
       expect(request.headers['User-Agent'], startsWith('Mozilla/5.0'));
-      return http.Response(
-        '<div><a href="/subject/1">幼女战记 第二季</a></div>',
+      return http.Response.bytes(
+        utf8.encode(
+          '<html><body><div><a href="/subject/1">幼女战记 第二季</a></div></body></html>',
+        ),
         200,
-        headers: {'content-type': 'text/html'},
+        headers: {'content-type': 'text/html; charset=utf-8'},
       );
     });
     final engine = KazumiApiRuleEngine(client: client);
@@ -423,6 +425,128 @@ void main() {
       await engine.close();
     },
   );
+
+  test('renders sourceTemplate for API search results', () async {
+    final rule = KazumiRule.fromJson(
+      _apiRuleJson(
+        searchApiConfig: {
+          'request': {
+            'method': 'GET',
+            'url': 'https://www.lmm85.com/index.php/ajax/suggest',
+            'query': {'mid': '1', 'wd': '@keyword'},
+          },
+          'listPath': r'$.list[*]',
+          'namePath': r'$.name',
+          'sourcePath': r'$.id',
+          'sourceTemplate':
+              'https://www.lmm85.com/index.php/vod/detail/id/@source.html',
+        },
+      ),
+    );
+    final engine = KazumiApiRuleEngine(
+      client: MockClient((request) async {
+        expect(request.url.path, '/index.php/ajax/suggest');
+        return http.Response.bytes(
+          utf8.encode(
+            jsonEncode({
+              'list': [
+                {'id': 4399, 'name': '示例番剧'},
+              ],
+            }),
+          ),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      }),
+    );
+
+    final results = await engine.search(rule, '示例');
+
+    expect(
+      results.single.source,
+      'https://www.lmm85.com/index.php/vod/detail/id/4399.html',
+      reason: 'API Level 9 的 sourceTemplate 必须渲染进 source',
+    );
+    await engine.close();
+  });
+
+  test('treats a 403 challenge page as captcha when detection matches',
+      () async {
+    final rule = KazumiRule.fromJson({
+      'api': '6',
+      'type': 'anime',
+      'name': 'challenge-demo',
+      'version': '1.0',
+      'baseURL': 'https://example.com/',
+      'searchURL': 'https://example.com/search?wd=@keyword',
+      'searchList': '//div[@class="entry"]',
+      'searchName': '//span',
+      'searchResult': '//a',
+      'chapterRoads': '//div',
+      'chapterResult': '//a',
+      'antiCrawlerConfig': {
+        'enabled': true,
+        'captchaDetectType': 2,
+        'captchaDetectValue': 'cf-browser-verification',
+      },
+    });
+    final engine = KazumiApiRuleEngine(
+      client: MockClient(
+        (_) async => http.Response.bytes(
+          utf8.encode(
+            '<html><body><div id="cf-browser-verification"></div></body></html>',
+          ),
+          403,
+          headers: {'content-type': 'text/html; charset=utf-8'},
+        ),
+      ),
+    );
+
+    await expectLater(
+      engine.search(rule, '测试'),
+      throwsA(isA<KazumiCaptchaRequiredException>()),
+      reason: 'Cloudflare 挑战页通常返回 403，必须走验证码流程而不是直接报错',
+    );
+    await engine.close();
+  });
+
+  test('decodes non-UTF-8 bodies without throwing', () async {
+    final rule = KazumiRule.fromJson({
+      'api': '5',
+      'type': 'anime',
+      'name': 'gbk-demo',
+      'version': '1.0',
+      'baseURL': 'https://example.com/',
+      'searchURL': 'https://example.com/search?wd=@keyword',
+      'searchList': '//div',
+      'searchName': '//a',
+      'searchResult': '//a',
+      'chapterRoads': '//div',
+      'chapterResult': '//a',
+    });
+    // 0xD6 0xD0 是 GBK 的"中"；声明为 gbk 时必须能读出来而不是抛异常。
+    final gbkBytes = <int>[
+      ...utf8.encode('<html><body><div><a href="/s/1">'),
+      0xD6,
+      0xD0,
+      ...utf8.encode('</a></div></body></html>'),
+    ];
+    final engine = KazumiApiRuleEngine(
+      client: MockClient(
+        (_) async => http.Response.bytes(
+          gbkBytes,
+          200,
+          headers: {'content-type': 'text/html; charset=gbk'},
+        ),
+      ),
+    );
+
+    final results = await engine.search(rule, '测试');
+
+    expect(results, hasLength(1));
+    expect(results.single.source, 'https://example.com/s/1');
+    await engine.close();
+  });
 }
 
 Map<String, dynamic> _apiRuleJson({

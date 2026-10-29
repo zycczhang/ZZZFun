@@ -1,17 +1,21 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:html/dom.dart';
-import 'package:html/parser.dart' as html_parser;
 import 'package:http/http.dart' as http;
-import 'package:xpath_selector_html_parser/xpath_selector_html_parser.dart';
+import 'package:kazumi_rules/plugins/api_rule_config.dart';
+import 'package:kazumi_rules/services/plugin/api_rule_strategy.dart';
+import 'package:kazumi_rules/services/plugin/rule_engine_models.dart';
+import 'package:kazumi_rules/services/plugin/xpath_rule_strategy.dart';
 
 import '../models/kazumi_rule_models.dart';
 import '../models/video_source_models.dart';
 import 'app_logger.dart';
-import 'json_path_service.dart';
 import 'kazumi_rules_repository.dart';
 
+/// Raised when a rule site answers with an anti-crawler challenge page.
+///
+/// Upstream's `CaptchaRequiredException` only carries the plugin name; this
+/// variant also carries the URL the WebView verification dialog must load.
 class KazumiCaptchaRequiredException implements Exception {
   final String ruleName;
   final String url;
@@ -22,26 +26,32 @@ class KazumiCaptchaRequiredException implements Exception {
   String toString() => 'KazumiCaptchaRequiredException: $ruleName';
 }
 
+/// Executes Kazumi rules through the vendored upstream parsing layer.
+///
+/// Request preparation, templating, JSONPath and XPath parsing all come from
+/// `packages/kazumi_rules`. What lives here is only the transport (upstream
+/// uses Dio, this app uses `package:http`) and the small amount of
+/// orchestration that upstream keeps in `RuleEngine`, which is not vendored
+/// because it is hard-wired to Dio, Dio cookies and the app logger.
 class KazumiApiRuleEngine {
   static const _defaultUserAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
       'AppleWebKit/537.36 (KHTML, like Gecko) '
       'Chrome/141.0.0.0 Safari/537.36';
   static const _defaultAcceptLanguage = 'zh-CN,zh;q=0.9';
+  static const _apiStrategy = ApiRuleStrategy();
+  static const _xpathStrategy = XPathRuleStrategy();
 
   final http.Client _client;
   final Duration _timeout;
-  final JsonPathService _jsonPath;
   final bool _ownsClient;
   final Map<String, String> _cookieHeaders = {};
 
   KazumiApiRuleEngine({
     http.Client? client,
     Duration timeout = const Duration(seconds: 15),
-    JsonPathService jsonPath = const JsonPathService(),
   }) : _client = client ?? http.Client(),
        _timeout = timeout,
-       _jsonPath = jsonPath,
        _ownsClient = client == null;
 
   void setCookieHeader(String ruleName, String cookieHeader) {
@@ -55,38 +65,47 @@ class KazumiApiRuleEngine {
 
   Future<List<VideoSearchItem>> search(KazumiRule rule, String keyword) async {
     rule.validateForRuleEngine();
-    if (rule.searchMode == 'xpath') {
-      return _searchXPath(rule, keyword);
-    }
-    return _searchApi(rule, keyword);
-  }
-
-  Future<List<VideoSearchItem>> _searchApi(
-    KazumiRule rule,
-    String keyword,
-  ) async {
-    rule.validateForRuleEngine();
-    if (rule.searchMode != 'api' || rule.searchApi == null) {
-      throw const FormatException('规则缺少 API 搜索配置');
-    }
-    final config = rule.searchApi!;
-    final response = await _requestJson(
-      rule,
-      '搜索 ${rule.name}',
-      config.request,
-      {'keyword': keyword.trim()},
-    );
-    final rows = _jsonPath.readList(response, config.listPath);
-    final results = <VideoSearchItem>[];
-    for (final row in rows) {
-      final name = _stringValue(_readPath(row, config.namePath));
-      final source = _stringValue(_readPath(row, config.sourcePath));
-      if (name.isEmpty || source.isEmpty) continue;
-      results.add(
-        VideoSearchItem(name: name, source: source, ruleName: rule.name),
+    final config = _configFor(rule);
+    try {
+      final request = config.searchMode == RuleMode.api
+          ? _apiStrategy.prepareRequest(config.searchApiConfig.request, {
+              'keyword': keyword.trim(),
+            })
+          : _xpathStrategy.prepareSearchRequest(config, keyword.trim());
+      final raw = await _execute(request, config, userAgent: rule.userAgent);
+      final parsed = config.searchMode == RuleMode.api
+          ? _apiStrategy.parseSearch(raw, config.searchApiConfig)
+          : _xpathStrategy.parseSearch(raw, config);
+      _logDiagnostics(rule, '搜索', parsed.diagnostics);
+      return parsed.items
+          .map(
+            (item) => VideoSearchItem(
+              name: item.name,
+              // Upstream already renders `searchApiConfig.sourceTemplate` for
+              // API rules, so `src` is a ready URL there. XPath rules return a
+              // raw href, which the chapter request normalizes on its own; make
+              // it absolute here only so the UI can display an address.
+              source: config.searchMode == RuleMode.api
+                  ? item.src
+                  : _absoluteSource(rule, item.src),
+              ruleName: rule.name,
+            ),
+          )
+          .toList(growable: false);
+    } on CaptchaRequiredException {
+      throw KazumiCaptchaRequiredException(
+        rule.name,
+        _captchaUrl(rule, keyword),
       );
+    } on FormatException {
+      rethrow;
+    } on ApiRuleFormatException catch (error) {
+      throw FormatException(error.message);
+    } on XPathRuleFormatException catch (error) {
+      throw FormatException(error.message);
+    } catch (error) {
+      throw _failure('搜索 ${rule.name}', error);
     }
-    return results;
   }
 
   Future<VideoChapterResult> getChapters(
@@ -94,522 +113,205 @@ class KazumiApiRuleEngine {
     VideoSearchItem item,
   ) async {
     rule.validateForRuleEngine();
-    if (rule.chapterMode == 'xpath') {
-      return _getXPathChapters(rule, item);
-    }
-    return _getApiChapters(rule, item);
-  }
-
-  Future<VideoChapterResult> _getApiChapters(
-    KazumiRule rule,
-    VideoSearchItem item,
-  ) async {
-    rule.validateForRuleEngine();
-    if (rule.chapterMode != 'api' || rule.chapterApi == null) {
-      throw const FormatException('规则缺少 API 分集配置');
-    }
     if (item.ruleName != rule.name) {
       throw KazumiRulesException('搜索结果与规则不匹配');
     }
-    final config = rule.chapterApi!;
-    final context = <String, dynamic>{'source': item.source};
-    final response = await _requestJson(
-      rule,
-      '获取 ${rule.name} 分集',
-      config.request,
-      context,
-    );
-
-    if (config.format == 'delimited') {
-      return _getDelimitedApiChapters(rule, item, config, response, context);
-    }
-
-    final rootVariables = <String, dynamic>{};
-    for (final entry in config.variables.entries) {
-      rootVariables[entry.key] =
-          _jsonPath.readFirst(response, entry.value) ?? '';
-    }
-
-    if (config.format.isNotEmpty && config.format != 'nested') {
-      throw FormatException('暂不支持的 API 分集格式: ${config.format}');
-    }
-    final roadRows = config.roadsPath.trim().isEmpty
-        ? <Object?>[response]
-        : _jsonPath.readList(response, config.roadsPath);
-    final sources = <VideoSource>[];
-    for (var roadIndex = 0; roadIndex < roadRows.length; roadIndex++) {
-      final road = roadRows[roadIndex];
-      final roadName = _stringValue(_readPath(road, config.roadNamePath));
-      final episodeRows = _jsonPath.readList(road, config.episodesPath);
-      final episodes = <VideoEpisode>[];
-      for (
-        var episodeIndex = 0;
-        episodeIndex < episodeRows.length;
-        episodeIndex++
-      ) {
-        final episode = episodeRows[episodeIndex];
-        final episodeName = _stringValue(
-          _readPath(episode, config.episodeNamePath),
-        );
-        final episodeUrl = _stringValue(
-          _readPath(episode, config.episodeUrlPath),
-        );
-        final episodeContext = <String, dynamic>{
-          ...context,
-          ...rootVariables,
-          'roadIndex': roadIndex,
-          'roadNumber': roadIndex + 1,
-          'episodeIndex': episodeIndex,
-          'episodeNumber': episodeIndex + 1,
-          'episodeUrl': episodeUrl,
-        };
-        final pageUrl = _buildEpisodePageUrl(
-          rule,
-          config.episodePage,
-          episodeContext,
-          episodeUrl,
-        );
-        if (pageUrl.isEmpty) continue;
-        episodes.add(
-          VideoEpisode(
-            name: episodeName.isEmpty ? '第${episodeIndex + 1}集' : episodeName,
-            pageUrl: pageUrl,
-            roadIndex: roadIndex,
-            episodeIndex: episodeIndex,
-            requestHeaders: _pageHeaders(rule),
-            mediaHeaders: _mediaHeaders(rule),
-            useLegacyParser: rule.useLegacyParser,
-          ),
-        );
+    final config = _configFor(rule);
+    try {
+      final request = config.chapterMode == RuleMode.api
+          ? _apiStrategy.prepareRequest(config.chapterApiConfig.request, {
+              'source': item.source,
+            })
+          : _xpathStrategy.prepareChapterRequest(config, item.source);
+      final raw = await _execute(request, config, userAgent: rule.userAgent);
+      final parsed = config.chapterMode == RuleMode.api
+          ? _apiStrategy.parseChapters(
+              raw,
+              config.chapterApiConfig,
+              source: item.source,
+              baseUrl: config.baseUrl,
+            )
+          : _xpathStrategy.parseChapters(raw, config);
+      _logDiagnostics(rule, '分集', parsed.diagnostics);
+      final sources = <VideoSource>[];
+      for (var roadIndex = 0; roadIndex < parsed.roads.length; roadIndex++) {
+        final road = parsed.roads[roadIndex];
+        final episodes = <VideoEpisode>[];
+        for (var index = 0; index < road.data.length; index++) {
+          episodes.add(
+            VideoEpisode(
+              name: index < road.identifier.length
+                  ? road.identifier[index]
+                  : '第${index + 1}集',
+              pageUrl: road.data[index],
+              roadIndex: roadIndex,
+              episodeIndex: index,
+              requestHeaders: _pageHeaders(rule),
+              mediaHeaders: _mediaHeaders(rule),
+              useLegacyParser: rule.useLegacyParser,
+            ),
+          );
+        }
+        if (episodes.isEmpty) continue;
+        sources.add(VideoSource(name: road.name, episodes: episodes));
       }
-      if (episodes.isNotEmpty) {
-        sources.add(
-          VideoSource(
-            name: roadName.isEmpty ? '线路 ${roadIndex + 1}' : roadName,
-            episodes: episodes,
-          ),
-        );
-      }
-    }
-    return VideoChapterResult(
-      ruleName: rule.name,
-      source: item.source,
-      sources: sources,
-    );
-  }
-
-  VideoChapterResult _getDelimitedApiChapters(
-    KazumiRule rule,
-    VideoSearchItem item,
-    KazumiApiChapterConfig config,
-    dynamic response,
-    Map<String, dynamic> context,
-  ) {
-    if (config.roadSeparator.isEmpty ||
-        config.episodeSeparator.isEmpty ||
-        config.fieldSeparator.isEmpty) {
-      throw const FormatException('API 分集分隔符不能为空');
-    }
-    final roadNamesValue = _stringValue(
-      _readPath(response, config.roadNamesPath),
-    );
-    final roadEpisodesValue = _stringValue(
-      _readPath(response, config.roadEpisodesPath),
-    );
-    if (roadEpisodesValue.isEmpty) {
       return VideoChapterResult(
         ruleName: rule.name,
         source: item.source,
-        sources: const [],
+        sources: sources,
       );
-    }
-
-    final roadNames = roadNamesValue.split(config.roadSeparator);
-    final roadGroups = roadEpisodesValue.split(config.roadSeparator);
-    final rootVariables = <String, dynamic>{...context};
-    for (final entry in config.variables.entries) {
-      rootVariables[entry.key] =
-          _jsonPath.readFirst(response, entry.value) ?? '';
-    }
-    final sources = <VideoSource>[];
-    for (var roadIndex = 0; roadIndex < roadGroups.length; roadIndex++) {
-      final episodes = <VideoEpisode>[];
-      final entries = roadGroups[roadIndex].split(config.episodeSeparator);
-      for (
-        var episodeIndex = 0;
-        episodeIndex < entries.length;
-        episodeIndex++
-      ) {
-        final entry = entries[episodeIndex].trim();
-        if (entry.isEmpty) continue;
-        final separatorIndex = entry.indexOf(config.fieldSeparator);
-        if (separatorIndex < 0) continue;
-        final episodeName = entry.substring(0, separatorIndex).trim();
-        final episodeUrl = entry
-            .substring(separatorIndex + config.fieldSeparator.length)
-            .trim();
-        final episodeContext = <String, dynamic>{
-          ...rootVariables,
-          'roadIndex': roadIndex,
-          'roadNumber': roadIndex + 1,
-          'episodeIndex': episodeIndex,
-          'episodeNumber': episodeIndex + 1,
-          'episodeUrl': episodeUrl,
-        };
-        final pageUrl = _buildEpisodePageUrl(
-          rule,
-          config.episodePage,
-          episodeContext,
-          episodeUrl,
-        );
-        if (pageUrl.isEmpty) continue;
-        episodes.add(
-          VideoEpisode(
-            name: episodeName.isEmpty ? '第${episodeIndex + 1}集' : episodeName,
-            pageUrl: pageUrl,
-            roadIndex: roadIndex,
-            episodeIndex: episodeIndex,
-            requestHeaders: _pageHeaders(rule),
-            mediaHeaders: _mediaHeaders(rule),
-            useLegacyParser: rule.useLegacyParser,
-          ),
-        );
-      }
-      if (episodes.isNotEmpty) {
-        sources.add(
-          VideoSource(
-            name:
-                roadIndex < roadNames.length &&
-                    roadNames[roadIndex].trim().isNotEmpty
-                ? roadNames[roadIndex].trim()
-                : '线路 ${roadIndex + 1}',
-            episodes: episodes,
-          ),
-        );
-      }
-    }
-    return VideoChapterResult(
-      ruleName: rule.name,
-      source: item.source,
-      sources: sources,
-    );
-  }
-
-  Future<List<VideoSearchItem>> _searchXPath(
-    KazumiRule rule,
-    String keyword,
-  ) async {
-    final searchUrl = rule.searchUrl.replaceAll(
-      '@keyword',
-      Uri.encodeQueryComponent(keyword.trim()),
-    );
-    final parsedUrl = Uri.tryParse(searchUrl);
-    if (parsedUrl == null || !parsedUrl.hasScheme || parsedUrl.host.isEmpty) {
-      throw FormatException('规则搜索 URL 无效: $searchUrl');
-    }
-
-    String method = 'GET';
-    Uri requestUrl = parsedUrl;
-    String? body;
-    if (rule.usePost) {
-      method = 'POST';
-      final query = parsedUrl.queryParameters;
-      requestUrl = parsedUrl.replace(queryParameters: const {});
-      body = query.entries
-          .map(
-            (entry) =>
-                '${Uri.encodeQueryComponent(entry.key)}='
-                '${Uri.encodeQueryComponent(entry.value)}',
-          )
-          .join('&');
-    }
-
-    final raw = await _requestHtml(
-      rule,
-      '搜索 ${rule.name}',
-      requestUrl,
-      method: method,
-      body: body,
-    );
-    final root = _parseHtmlRoot(raw);
-    if (_isCaptchaPage(rule, raw, root)) {
-      throw KazumiCaptchaRequiredException(rule.name, searchUrl);
-    }
-    final nodes = _runXPath(rule.searchList, root, '搜索结果列表');
-    final results = <VideoSearchItem>[];
-    for (var index = 0; index < nodes.length; index++) {
-      final node = nodes[index];
-      try {
-        final nameNode = _runXPathNode(rule.searchName, node, '搜索结果名称');
-        final resultNode = _runXPathNode(rule.searchResult, node, '搜索结果链接');
-        final name = nameNode?.text?.trim() ?? '';
-        final source = resultNode?.attributes['href']?.trim() ?? '';
-        if (name.isEmpty || source.isEmpty) continue;
-        results.add(
-          VideoSearchItem(
-            name: name,
-            source: _resolveUrl(rule, source),
-            ruleName: rule.name,
-          ),
-        );
-      } catch (error) {
-        AppLogger.warning(
-          'kazumi-rules',
-          '${rule.name} 搜索结果 $index 解析失败',
-          error,
-        );
-      }
-    }
-    return results;
-  }
-
-  Future<VideoChapterResult> _getXPathChapters(
-    KazumiRule rule,
-    VideoSearchItem item,
-  ) async {
-    if (item.ruleName != rule.name) {
-      throw KazumiRulesException('搜索结果与规则不匹配');
-    }
-    final chapterUrl = Uri.tryParse(_resolveUrl(rule, item.source));
-    if (chapterUrl == null ||
-        !chapterUrl.hasScheme ||
-        chapterUrl.host.isEmpty) {
-      throw FormatException('规则分集 URL 无效: ${item.source}');
-    }
-    final raw = await _requestHtml(rule, '获取 ${rule.name} 分集', chapterUrl);
-    final root = _parseHtmlRoot(raw);
-    final roadNodes = _runXPath(rule.chapterRoads, root, '播放线路列表');
-    final sources = <VideoSource>[];
-    for (var roadIndex = 0; roadIndex < roadNodes.length; roadIndex++) {
-      final roadNode = roadNodes[roadIndex];
-      final episodeNodes = _runXPath(rule.chapterResult, roadNode, '剧集列表');
-      final episodes = <VideoEpisode>[];
-      for (
-        var episodeIndex = 0;
-        episodeIndex < episodeNodes.length;
-        episodeIndex++
-      ) {
-        final episodeNode = episodeNodes[episodeIndex];
-        final source = episodeNode.attributes['href']?.trim() ?? '';
-        if (source.isEmpty) continue;
-        final name = (episodeNode.text ?? '').replaceAll(RegExp(r'\s+'), '');
-        episodes.add(
-          VideoEpisode(
-            name: name.isEmpty ? '第${episodeIndex + 1}集' : name,
-            pageUrl: _resolveUrl(rule, source),
-            roadIndex: roadIndex,
-            episodeIndex: episodeIndex,
-            requestHeaders: _pageHeaders(rule),
-            mediaHeaders: _mediaHeaders(rule),
-            useLegacyParser: rule.useLegacyParser,
-          ),
-        );
-      }
-      if (episodes.isNotEmpty) {
-        sources.add(
-          VideoSource(name: '播放线路${sources.length + 1}', episodes: episodes),
-        );
-      }
-    }
-    return VideoChapterResult(
-      ruleName: rule.name,
-      source: item.source,
-      sources: sources,
-    );
-  }
-
-  Element _parseHtmlRoot(String raw) {
-    try {
-      final root = html_parser.parse(raw).documentElement;
-      if (root == null) throw const FormatException('HTML 没有根节点');
-      return root;
+    } on FormatException {
+      rethrow;
+    } on ApiRuleFormatException catch (error) {
+      throw FormatException(error.message);
+    } on XPathRuleFormatException catch (error) {
+      throw FormatException(error.message);
     } catch (error) {
-      if (error is FormatException) rethrow;
-      throw FormatException('HTML 解析失败: $error');
+      throw _failure('获取 ${rule.name} 分集', error);
     }
   }
 
-  bool _isCaptchaPage(KazumiRule rule, String raw, Element root) {
-    final config = rule.antiCrawler;
-    if (!config.enabled) return false;
-    final detectValue = config.captchaDetectValue.trim();
-    if (detectValue.isNotEmpty) {
-      switch (config.captchaDetectType) {
-        case 2:
-          return raw.contains(detectValue);
-        case 3:
-          try {
-            return RegExp(
-              detectValue,
-              caseSensitive: false,
-              dotAll: true,
-            ).hasMatch(raw);
-          } on FormatException {
-            return false;
-          }
-        case 1:
-        default:
-          try {
-            return _runXPath(detectValue, root, '验证页检测').isNotEmpty;
-          } on FormatException {
-            return false;
-          }
-      }
-    }
-    for (final expression in [config.captchaImage, config.captchaButton]) {
-      if (expression.trim().isEmpty) continue;
-      try {
-        if (_runXPath(expression, root, '验证元素检测').isNotEmpty) return true;
-      } on FormatException {
-        // A malformed optional fallback selector should not block normal search.
-      }
-    }
-    return false;
+  KazumiRulesException _failure(String operation, Object error) {
+    if (error is KazumiRulesException) return error;
+    AppLogger.warning('kazumi-rules', '$operation失败', error);
+    return KazumiRulesException('$operation失败', cause: error);
   }
 
-  List<dynamic> _runXPath(String expression, Object root, String label) {
-    if (expression.trim().isEmpty) {
-      throw FormatException('$label XPath 不能为空');
-    }
-    try {
-      final result = root is Element
-          ? HtmlXPath.node(root).query(expression)
-          : (root as dynamic).queryXPath(expression);
-      return List<dynamic>.from(result.nodes);
-    } catch (error) {
-      throw FormatException('$label XPath 无效: $expression ($error)');
-    }
+  void _logDiagnostics(KazumiRule rule, String phase, List<String> items) {
+    if (items.isEmpty) return;
+    final preview = items.take(3).join('; ');
+    AppLogger.warning(
+      'kazumi-rules',
+      '${rule.name} $phase 跳过 ${items.length} 个节点: $preview',
+    );
   }
 
-  dynamic _runXPathNode(String expression, Object root, String label) {
-    final nodes = _runXPath(expression, root, label);
-    return nodes.isEmpty ? null : nodes.first;
-  }
-
-  String _resolveUrl(KazumiRule rule, String raw) {
+  String _absoluteSource(KazumiRule rule, String raw) {
     final value = raw.trim();
     if (value.isEmpty) return '';
     final parsed = Uri.tryParse(value);
-    if (parsed?.hasScheme == true) return parsed!.toString();
+    if (parsed != null && parsed.hasScheme && parsed.host.isNotEmpty) {
+      return value;
+    }
     final base = rule.baseUrl;
-    if (base != null) return base.resolve(value).toString();
-    return value;
+    if (base == null || base.host.isEmpty) return value;
+    return base.resolve(value).toString();
   }
 
-  Future<String> _requestHtml(
-    KazumiRule rule,
-    String operation,
-    Uri uri, {
-    String method = 'GET',
-    String? body,
+  RuleExecutionConfig _configFor(KazumiRule rule) {
+    return RuleExecutionConfig(
+      pluginName: rule.name,
+      baseUrl: rule.baseUrl?.toString() ?? '',
+      usePost: rule.usePost,
+      searchMode: rule.searchMode,
+      chapterMode: rule.chapterMode,
+      searchUrl: rule.searchUrl,
+      searchList: rule.searchList,
+      searchName: rule.searchName,
+      searchResult: rule.searchResult,
+      chapterRoads: rule.chapterRoads,
+      chapterResult: rule.chapterResult,
+      searchApiConfig: rule.searchApiConfig,
+      chapterApiConfig: rule.chapterApiConfig,
+      antiCrawlerConfig: rule.antiCrawlerConfig,
+    );
+  }
+
+  /// URL the captcha dialog should load so the user can clear the challenge.
+  String _captchaUrl(KazumiRule rule, String keyword) {
+    final template = rule.searchUrl.trim();
+    if (template.isEmpty) return rule.baseUrl?.toString() ?? '';
+    return template.replaceAll('@keyword', Uri.encodeQueryComponent(keyword));
+  }
+
+  Map<String, String> _pageHeaders(KazumiRule rule) => {
+    'User-Agent': rule.userAgent.isEmpty ? _defaultUserAgent : rule.userAgent,
+    if (rule.referer.isNotEmpty) 'Referer': rule.referer,
+  };
+
+  Map<String, String> _mediaHeaders(KazumiRule rule) => {
+    'User-Agent': rule.userAgent.isEmpty ? _defaultUserAgent : rule.userAgent,
+    if (rule.referer.isNotEmpty) 'Referer': rule.referer,
+  };
+
+  Future<String> _execute(
+    PreparedRuleRequest request,
+    RuleExecutionConfig config, {
+    required String userAgent,
   }) async {
+    final uri = _buildUri(request.url, request.query);
     final headers = <String, String>{
       'Accept':
           'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': _defaultAcceptLanguage,
       'Connection': 'keep-alive',
-      'User-Agent': rule.userAgent.isEmpty ? _defaultUserAgent : rule.userAgent,
-      if (rule.referer.isNotEmpty)
-        'Referer': rule.referer
-      else if (rule.baseUrl != null)
-        'Referer': rule.baseUrl.toString(),
-      if (_cookieHeaders[rule.name]?.isNotEmpty == true)
-        'Cookie': _cookieHeaders[rule.name]!,
-      if (method == 'POST') 'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': userAgent.isEmpty ? _defaultUserAgent : userAgent,
+      // Upstream uses the site root as Referer for every rule request.
+      if (config.baseUrl.trim().isNotEmpty)
+        'Referer': '${config.baseUrl.trim().replaceAll(RegExp(r'/+$'), '')}/',
+      if (request.includeCookies &&
+          (_cookieHeaders[config.pluginName]?.isNotEmpty ?? false))
+        'Cookie': _cookieHeaders[config.pluginName]!,
+      for (final entry in request.headers.entries)
+        _sanitizeHeaderName(entry.key): _sanitizeHeaderValue(entry.value),
     };
+    final method = request.method.toUpperCase();
+    final body = method == 'POST' && request.body != null
+        ? _encodeBody(request, headers)
+        : null;
+
+    final http.Response response;
     try {
-      final response = await _send(
-        method,
-        uri,
-        headers,
-        body,
-      ).timeout(_timeout);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw KazumiRulesException(
-          '$operation请求失败',
-          statusCode: response.statusCode,
-        );
-      }
-      return utf8.decode(response.bodyBytes);
-    } on KazumiRulesException catch (error, stackTrace) {
-      AppLogger.warning('kazumi-rules', error.message, error, stackTrace);
-      rethrow;
+      response = await _send(method, uri, headers, body).timeout(_timeout);
     } on TimeoutException catch (error, stackTrace) {
-      final exception = KazumiRulesException('$operation超时', cause: error);
-      AppLogger.warning(
-        'kazumi-rules',
-        exception.message,
-        exception,
-        stackTrace,
-      );
-      throw exception;
+      AppLogger.warning('kazumi-rules', '规则请求超时', error, stackTrace);
+      throw KazumiRulesException('规则请求超时', cause: error);
     } catch (error, stackTrace) {
-      final exception = KazumiRulesException('$operation失败', cause: error);
-      AppLogger.warning('kazumi-rules', exception.message, error, stackTrace);
-      throw exception;
+      if (error is KazumiRulesException) rethrow;
+      AppLogger.warning('kazumi-rules', '规则请求失败', error, stackTrace);
+      throw KazumiRulesException('规则请求失败', cause: error);
     }
+
+    final decoded = _decodeBody(response);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      // Upstream inspects failed responses before giving up: protected sites
+      // commonly answer the challenge page with 403/429/503.
+      if (config.searchMode == RuleMode.xpath &&
+          config.antiCrawlerConfig.enabled &&
+          _xpathStrategy.detectsCaptchaChallenge(
+            decoded,
+            config.antiCrawlerConfig,
+          )) {
+        throw CaptchaRequiredException(config.pluginName);
+      }
+      throw KazumiRulesException(
+        '规则请求失败',
+        statusCode: response.statusCode,
+      );
+    }
+    return decoded;
   }
 
-  Future<dynamic> _requestJson(
-    KazumiRule rule,
-    String operation,
-    KazumiRuleRequest request,
-    Map<String, dynamic> context,
-  ) async {
-    final uri = _buildUri(rule, request.url, request.query, context);
-    final headers = <String, String>{
-      'Accept': 'application/json',
-      'Accept-Language': _defaultAcceptLanguage,
-      'Connection': 'keep-alive',
-      'User-Agent': rule.userAgent.isEmpty ? _defaultUserAgent : rule.userAgent,
-      if (rule.referer.isNotEmpty)
-        'Referer': rule.referer
-      else if (rule.baseUrl != null)
-        'Referer': rule.baseUrl.toString(),
-      if (_cookieHeaders[rule.name]?.isNotEmpty == true)
-        'Cookie': _cookieHeaders[rule.name]!,
-      ...request.headers.map(
-        (key, value) => MapEntry(key, _expandString(value, context)),
-      ),
-    };
-    final method = request.method.isEmpty ? 'GET' : request.method;
-    final body = _buildBody(request, context, headers);
-
-    try {
-      final response = await _send(
-        method,
-        uri,
-        headers,
-        body,
-      ).timeout(_timeout);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw KazumiRulesException(
-          '$operation请求失败',
-          statusCode: response.statusCode,
-        );
-      }
-      try {
-        return jsonDecode(utf8.decode(response.bodyBytes));
-      } on FormatException catch (error) {
-        throw KazumiRulesException('$operation返回了无效 JSON', cause: error);
-      }
-    } on KazumiRulesException catch (error, stackTrace) {
-      AppLogger.warning('kazumi-rules', error.message, error, stackTrace);
-      rethrow;
-    } on TimeoutException catch (error, stackTrace) {
-      final exception = KazumiRulesException('$operation超时', cause: error);
-      AppLogger.warning(
-        'kazumi-rules',
-        exception.message,
-        exception,
-        stackTrace,
+  String _encodeBody(PreparedRuleRequest request, Map<String, String> headers) {
+    if (request.bodyType == ApiBodyType.form) {
+      headers.putIfAbsent(
+        'Content-Type',
+        () => 'application/x-www-form-urlencoded',
       );
-      throw exception;
-    } catch (error, stackTrace) {
-      final exception = KazumiRulesException('$operation失败', cause: error);
-      AppLogger.warning('kazumi-rules', exception.message, error, stackTrace);
-      throw exception;
+      final body = request.body;
+      if (body is Map) {
+        return body.entries
+            .map(
+              (entry) =>
+                  '${Uri.encodeQueryComponent(entry.key.toString())}='
+                  '${Uri.encodeQueryComponent(entry.value?.toString() ?? '')}',
+            )
+            .join('&');
+      }
+      return body?.toString() ?? '';
     }
+    headers.putIfAbsent('Content-Type', () => 'application/json');
+    return jsonEncode(request.body);
   }
 
   Future<http.Response> _send(
@@ -623,182 +325,58 @@ class KazumiApiRuleEngine {
         return _client.get(uri, headers: headers);
       case 'POST':
         return _client.post(uri, headers: headers, body: body);
-      case 'PUT':
-        return _client.put(uri, headers: headers, body: body);
-      case 'DELETE':
-        return _client.delete(uri, headers: headers, body: body);
       default:
         throw KazumiRulesException('不支持的规则请求方法: $method');
     }
   }
 
-  Uri _buildUri(
-    KazumiRule rule,
-    String rawUrl,
-    Map<String, dynamic> query,
-    Map<String, dynamic> context,
-  ) {
-    if (rawUrl.trim().isEmpty) {
-      throw const KazumiRulesException('规则请求 URL 不能为空');
+  Uri _buildUri(String rawUrl, Map<String, dynamic> query) {
+    final parsed = Uri.tryParse(rawUrl.trim());
+    if (parsed == null || !parsed.hasScheme || parsed.host.isEmpty) {
+      throw KazumiRulesException('规则请求 URL 无效: $rawUrl');
     }
-    final expandedUrl = _expandString(rawUrl, context, encode: true);
-    final base = rule.baseUrl;
-    final parsed = Uri.tryParse(expandedUrl);
-    final resolved = parsed?.hasScheme == true
-        ? parsed!
-        : base?.resolve(expandedUrl) ?? Uri.parse(expandedUrl);
-    _validateHttpUri(resolved);
-    final expandedQuery = _expandMap(query, context);
-    if (expandedQuery.isEmpty) return resolved;
-    return resolved.replace(
+    if (parsed.scheme != 'http' && parsed.scheme != 'https') {
+      throw KazumiRulesException('规则地址不是 HTTP(S) 地址: $rawUrl');
+    }
+    if (query.isEmpty) return parsed;
+    return parsed.replace(
       queryParameters: {
-        ...resolved.queryParameters,
-        ...expandedQuery.map(
-          (key, value) => MapEntry(key, _stringValue(value)),
-        ),
+        ...parsed.queryParameters,
+        ...query.map((key, value) => MapEntry(key, value?.toString() ?? '')),
       },
     );
   }
 
-  String? _buildBody(
-    KazumiRuleRequest request,
-    Map<String, dynamic> context,
-    Map<String, String> headers,
-  ) {
-    if (request.body == null) return null;
-    final body = _expandValue(request.body, context);
-    switch (request.bodyType) {
-      case 'form':
-      case 'formdata':
-      case 'x-www-form-urlencoded':
-        headers.putIfAbsent(
-          'Content-Type',
-          () => 'application/x-www-form-urlencoded',
-        );
-        if (body is Map) {
-          return body.entries
-              .map(
-                (entry) =>
-                    '${Uri.encodeQueryComponent(entry.key.toString())}='
-                    '${Uri.encodeQueryComponent(_stringValue(entry.value))}',
-              )
-              .join('&');
-        }
-        return body.toString();
-      case 'none':
-        return null;
-      case 'json':
-      case '':
-        headers.putIfAbsent('Content-Type', () => 'application/json');
-        return jsonEncode(body);
-      default:
-        throw KazumiRulesException('不支持的规则 bodyType: ${request.bodyType}');
+  /// Decodes the body using the charset declared in `Content-Type`.
+  ///
+  /// Falls back to a lenient UTF-8 decode so a mis-declared body yields text
+  /// instead of a FormatException on a stray byte.
+  String _decodeBody(http.Response response) {
+    final bytes = response.bodyBytes;
+    final charset = _charsetOf(response.headers['content-type']);
+    if (charset == 'utf-8' || charset == 'utf8') {
+      return utf8.decode(bytes, allowMalformed: true);
     }
+    if (charset != null && charset != 'utf-8') {
+      AppLogger.debug('kazumi-rules', '未支持的响应编码 $charset，按 UTF-8 解码');
+    }
+    return utf8.decode(bytes, allowMalformed: true);
   }
 
-  String _buildEpisodePageUrl(
-    KazumiRule rule,
-    KazumiEpisodePage? page,
-    Map<String, dynamic> context,
-    String episodeUrl,
-  ) {
-    if (page == null || page.url.isEmpty) {
-      final resolved = _resolveUrl(rule, episodeUrl);
-      final parsed = Uri.tryParse(resolved);
-      if (parsed == null || !parsed.hasScheme) return '';
-      _validateHttpUri(parsed);
-      return parsed.toString();
-    }
-    final expandedUrl = _expandString(page.url, context, encode: true);
-    final parsed = Uri.tryParse(expandedUrl);
-    final resolved = parsed?.hasScheme == true
-        ? parsed!
-        : rule.baseUrl?.resolve(expandedUrl) ?? Uri.parse(expandedUrl);
-    _validateHttpUri(resolved);
-    final query = _expandMap(page.query, context);
-    return query.isEmpty
-        ? resolved.toString()
-        : resolved
-              .replace(
-                queryParameters: {
-                  ...resolved.queryParameters,
-                  ...query.map(
-                    (key, value) => MapEntry(key, _stringValue(value)),
-                  ),
-                },
-              )
-              .toString();
+  String? _charsetOf(String? contentType) {
+    if (contentType == null) return null;
+    final match = RegExp(
+      r'charset\s*=\s*"?([\w-]+)"?',
+      caseSensitive: false,
+    ).firstMatch(contentType);
+    return match?.group(1)?.toLowerCase();
   }
 
-  Map<String, String> _pageHeaders(KazumiRule rule) => {
-    'User-Agent': rule.userAgent.isEmpty ? _defaultUserAgent : rule.userAgent,
-    if (rule.referer.isNotEmpty) 'Referer': rule.referer,
-  };
+  String _sanitizeHeaderName(String name) =>
+      name.trim().replaceAll(RegExp(r'[\r\n]'), '');
 
-  Map<String, String> _mediaHeaders(KazumiRule rule) => {
-    'User-Agent': rule.userAgent.isEmpty ? _defaultUserAgent : rule.userAgent,
-    if (rule.referer.isNotEmpty) 'Referer': rule.referer,
-  };
-
-  Map<String, dynamic> _expandMap(
-    Map<String, dynamic> values,
-    Map<String, dynamic> context,
-  ) => values.map((key, value) => MapEntry(key, _expandValue(value, context)));
-
-  dynamic _expandValue(dynamic value, Map<String, dynamic> context) {
-    if (value is String) {
-      final exact = RegExp(r'^@([A-Za-z][A-Za-z0-9_]*)$').firstMatch(value);
-      if (exact != null && context.containsKey(exact.group(1))) {
-        return context[exact.group(1)];
-      }
-      return _expandString(value, context);
-    }
-    if (value is Map) {
-      return value.map(
-        (key, item) => MapEntry(key.toString(), _expandValue(item, context)),
-      );
-    }
-    if (value is List) {
-      return value.map((item) => _expandValue(item, context)).toList();
-    }
-    return value;
-  }
-
-  String _expandString(
-    String value,
-    Map<String, dynamic> context, {
-    bool encode = false,
-  }) {
-    var result = value;
-    final keys = context.keys.toList()
-      ..sort((left, right) => right.length.compareTo(left.length));
-    for (final key in keys) {
-      final replacement = _stringValue(context[key]);
-      result = result.replaceAll(
-        '@$key',
-        encode ? Uri.encodeComponent(replacement) : replacement,
-      );
-    }
-    return result;
-  }
-
-  String _stringValue(Object? value) {
-    if (value == null) return '';
-    if (value is String) return value.trim();
-    return value.toString().trim();
-  }
-
-  Object? _readPath(Object? root, String path) {
-    final normalizedPath = path.trim();
-    if (normalizedPath.isEmpty) return null;
-    return _jsonPath.readFirst(root, normalizedPath);
-  }
-
-  void _validateHttpUri(Uri uri) {
-    if (uri.scheme != 'http' && uri.scheme != 'https') {
-      throw KazumiRulesException('规则地址不是 HTTP(S) 地址: $uri');
-    }
-  }
+  String _sanitizeHeaderValue(Object? value) =>
+      (value?.toString() ?? '').replaceAll(RegExp(r'[\r\n]'), '');
 
   Future<void> close() async {
     if (_ownsClient) _client.close();

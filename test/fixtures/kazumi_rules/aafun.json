@@ -1,0 +1,17 @@
+{
+    "api": "4",
+    "type": "anime",
+    "name": "aafun",
+    "version": "1.2",
+    "muliSources": true,
+    "useWebview": true,
+    "useNativePlayer": true,
+    "userAgent": "",
+    "baseURL": "https://www.moonci.com/",
+    "searchURL": "https://www.moonci.com/search/-------------.html?wd=@keyword&submit=",
+    "searchList": "//div[2]/div[1]/div[2]/div[1]/div[1]/div[1]/div[1]/div[2]/div[1]/ul[1]/li",
+    "searchName": "//div/div/div[2]/div/a",
+    "searchResult": "//div/div/div[2]/div/a",
+    "chapterRoads": "//",
+    "chapterResult": "//div[2]/div[2]/div[1]/div[1]/div[2]/div[1]/div[1]/div[2]/div[2]/div[1]/div[1]/ul[1]/li/a"
+}

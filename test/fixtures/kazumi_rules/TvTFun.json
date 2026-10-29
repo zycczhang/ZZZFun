@@ -1,0 +1,48 @@
+{
+  "api": "9",
+  "type": "anime",
+  "name": "TvTFun",
+  "version": "1.3",
+  "muliSources": true,
+  "useWebview": true,
+  "useNativePlayer": true,
+  "usePost": false,
+  "useLegacyParser": false,
+  "adBlocker": true,
+  "userAgent": "",
+  "baseURL": "https://www.tvtfun.net",
+  "searchURL": "",
+  "searchList": "",
+  "searchName": "",
+  "searchResult": "",
+  "chapterRoads": "//ol[@class*='tvt-watch-episodes']",
+  "chapterResult": "//li/a",
+  "referer": "",
+  "searchMode": "api",
+  "chapterMode": "xpath",
+  "searchApiConfig": {
+    "request": {
+      "method": "GET",
+      "url": "https://www.tvtfun.net/api/client/anime",
+      "query": {
+        "keyword": "@keyword",
+        "page": 1,
+        "pageSize": 24
+      }
+    },
+    "listPath": "$.data.items[*]",
+    "namePath": "$.name",
+    "sourcePath": "$.slug",
+    "sourceTemplate": "https://www.tvtfun.net/watch/@source/1"
+  },
+  "antiCrawlerConfig": {
+    "enabled": false,
+    "captchaType": 1,
+    "captchaImage": "",
+    "captchaInput": "",
+    "captchaButton": "",
+    "captchaDetectType": 1,
+    "captchaDetectValue": "",
+    "captchaScript": ""
+  }
+}

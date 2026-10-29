@@ -36,7 +36,7 @@
 - 搜索番剧，支持热度排序、关键词二次匹配、分页和页面缓存
 - Bangumi 番剧元数据、评分、简介、标签和海报解析
 - 独立番剧详情页，支持从首页、日期表、搜索和本地片单进入
-- KazumiRules API Level 8 规则读取、搜索、线路和分集解析
+- KazumiRules API Level 9 规则读取、搜索、线路和分集解析
 - 规则仓库支持远程刷新、规则安装、更新和删除，已安装规则保存在本地
 - 多规则播放源检索、别名重试、候选结果选择和分集切换
 - WebView 播放页解析 m3u8/mp4，并使用 `video_player` 播放
@@ -128,7 +128,7 @@ test/
 
 ## 第三方规则
 
-ZZZFun 使用 [Predidit/KazumiRules](https://github.com/Predidit/KazumiRules) 提供的规则文件。规则文件在运行时从公开仓库读取，ZZZFun 自己实现网络请求和 API Level 8 规则解析，不复制 Kazumi 项目的 GPL-3.0 执行代码。KazumiRules 仓库使用 MIT License，相关版权和许可信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。规则只描述如何请求第三方网站，规则仓库不代表第三方网站内容或播放地址的授权。
+ZZZFun 使用 [Predidit/KazumiRules](https://github.com/Predidit/KazumiRules) 提供的规则文件。规则文件在运行时从公开仓库读取。规则解析层直接复用 [Predidit/Kazumi](https://github.com/Predidit/Kazumi) 的实现，以本地 package `packages/kazumi_rules` 的形式引入，可用 `tool/sync_kazumi_rules.ps1` 同步上游改动。由于包含 Kazumi 的 GPL-3.0 代码，本项目整体以 GPL-3.0 分发，许可证见 [LICENSE](LICENSE)；KazumiRules 仓库本身使用 MIT License，相关版权和许可信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。规则只描述如何请求第三方网站，规则仓库不代表第三方网站内容或播放地址的授权。
 
 ### 规则仓库镜像
 

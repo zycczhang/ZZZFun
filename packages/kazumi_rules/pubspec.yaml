@@ -1,0 +1,16 @@
+name: kazumi_rules
+description: >-
+  Vendored copy of the Kazumi rule parsing layer (Predidit/Kazumi, GPL-3.0).
+  Files under lib/ are kept byte-identical to upstream except for the import
+  prefix rewrite performed by tool/sync_kazumi_rules.ps1.
+publish_to: 'none'
+
+environment:
+  sdk: ^3.10.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  html: ^0.15.5
+  json_path: ^0.9.0
+  xpath_selector_html_parser: ^3.0.1
